@@ -1,0 +1,24 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <!-- Simplified version of loupvagabond icon -->
+    <!-- Main wolf silhouette path (simplified from original SVG) -->
+    <path
+        android:fillColor="#cddc39"
+        android:pathData="M256,64C150,64 64,150 64,256s86,192 192 192s192,-86 192,-192S362,64 256,64z"/>
+    <!-- Additional simplified paths representing wolf features -->
+    <path
+        android:fillColor="#272a1f"
+        android:pathData="M200,200c-20,0 -40,20 -40,40s20,40 40,40s40,-20 40,-40S220,200 200,200z"/>
+    <path
+        android:fillColor="#272a1f"
+        android:pathData="M312,200c-20,0 -40,20 -40,40s20,40 40,40s40,-20 40,-40S332,200 312,200z"/>
+    <path
+        android:fillColor="#272a1f"
+        android:strokeWidth="4"
+        android:strokeColor="#272a1f"
+        android:pathData="M200,320 Q256,360 312,320"/>
+</vector>
+
