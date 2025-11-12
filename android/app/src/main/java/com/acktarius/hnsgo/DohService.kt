@@ -41,27 +41,29 @@ class DohService : Service() {
             scope.launch {
                 try {
                     Log.d("HNSGo", "Initializing SPV client in service...")
+                    // Configure resolver to use external Handshake resolver
+                    SpvClient.setResolver(Config.DEFAULT_RESOLVER_HOST, Config.DEFAULT_RESOLVER_PORT)
                     SpvClient.init(filesDir)
                     
                     // Start DoH server
                     Log.d("HNSGo", "Creating LocalDoHServer...")
                     val newDohServer = LocalDoHServer(filesDir)
-                    Log.d("HNSGo", "Starting DoH server on port 8443 (HTTPS)...")
+                    Log.d("HNSGo", "Starting DoH server on port ${Config.DOH_PORT} (HTTPS)...")
                     newDohServer.start()
                     dohServer = newDohServer
-                    Log.d("HNSGo", "DoH server started successfully on https://127.0.0.1:8443/dns-query")
+                    Log.d("HNSGo", "DoH server started successfully on https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                     
-                    // Start DoT server on port 1853 (above 1024, no root required)
+                    // Start DoT server (above 1024, no root required)
                     Log.d("HNSGo", "Creating LocalDoTServer...")
                     val newDotServer = LocalDoTServer(filesDir)
-                    Log.d("HNSGo", "Starting DoT server on port 1853...")
+                    Log.d("HNSGo", "Starting DoT server on port ${Config.DOT_PORT}...")
                     try {
                         newDotServer.start()
                         dotServer = newDotServer
                         Log.d("HNSGo", "DoT server started successfully on port ${newDotServer.actualPort}")
                     } catch (e: Exception) {
                         Log.e("HNSGo", "Error starting DoT server", e)
-                        Log.w("HNSGo", "DoH server on port 8443 is still available and working.")
+                        Log.w("HNSGo", "DoH server on port ${Config.DOH_PORT} is still available and working.")
                         // Continue without DoT - DoH will still work
                     }
                 } catch (e: Exception) {
@@ -125,7 +127,7 @@ class DohService : Service() {
     }
 }
 
-class LocalDoHServer(private val dataDir: File) : NanoHTTPD(8443) {
+class LocalDoHServer(private val dataDir: File) : NanoHTTPD(Config.DOH_PORT) {
     private val fallbackResolver = SimpleResolver("9.9.9.9") // Quad9 DNS (privacy-focused, blocks malware)
     
     init {
@@ -168,37 +170,90 @@ class LocalDoHServer(private val dataDir: File) : NanoHTTPD(8443) {
         val name = (nameStr as String).lowercase(Locale.getDefault())
         val type = q.type
 
-        // Check if this is a .hns domain
-        if (!name.endsWith(".hns")) {
-            // Forward to regular DNS server
+        // Try Handshake resolution first
+        val records = runBlocking { SpvClient.resolve(name) }
+        
+        // If not found in Handshake, fall back to regular DNS
+        if (records == null) {
             return forwardToDns(msg)
         }
 
-        // Handle .hns domains through SPV
-        val records = runBlocking { SpvClient.resolve(name) } ?: return nxdomain(msg)
-
-        val answer = records.find { it.type == type }?.let {
-            when (type) {
-                Type.A -> ARecord(q.name, DClass.IN, 3600, java.net.InetAddress.getByName(String(it.data)))
-                Type.TLSA -> TLSARecord(q.name, DClass.IN, 3600, (it.data[0].toInt() and 0xFF), (it.data[1].toInt() and 0xFF), (it.data[2].toInt() and 0xFF), it.data.sliceArray(3 until it.data.size))
-                else -> null
-            }
-        } ?: return nxdomain(msg)
-
-        val resp = Message(msg.header.id).apply {
+        // Build response with all relevant records
+        val resp = org.xbill.DNS.Message(msg.header.id).apply {
             header.setFlag(Flags.QR.toInt())
             addRecord(q, Section.QUESTION)
-            addRecord(answer, Section.ANSWER)
+            
+            // Find records matching the query type
+            val matchingRecords = records.filter { it.type == type }
+            
+            if (matchingRecords.isEmpty()) {
+                // If no direct match, check for CNAME (which might redirect)
+                val cnameRecord = records.find { it.type == 5 } // CNAME
+                if (cnameRecord != null) {
+                    val cnameTarget = String(cnameRecord.data).trim()
+                    val cnameName = Name(cnameTarget, Name.root)
+                    addRecord(CNAMERecord(q.name, DClass.IN, 3600, cnameName), Section.ANSWER)
+                    
+                    // Try to resolve the CNAME target if querying for A record
+                    // CNAME targets are usually regular DNS domains, so use fallback resolver
+                    if (type == Type.A) {
+                        try {
+                            val targetQuery = org.xbill.DNS.Message().apply {
+                                addRecord(org.xbill.DNS.Record.newRecord(cnameName, Type.A, DClass.IN), Section.QUESTION)
+                            }
+                            val targetResponse = runBlocking {
+                                withContext(Dispatchers.IO) {
+                                    fallbackResolver.send(targetQuery)
+                                }
+                            }
+                            val targetAnswers = targetResponse.getSection(Section.ANSWER)
+                            targetAnswers.filterIsInstance<ARecord>().forEach { aRec ->
+                                addRecord(ARecord(cnameName, DClass.IN, aRec.ttl, aRec.address), Section.ANSWER)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("HNSGo", "Error resolving CNAME target: $cnameTarget", e)
+                        }
+                    }
+                } else {
+                    return nxdomain(msg)
+                }
+            } else {
+                // Add matching records
+                matchingRecords.forEach { rec ->
+                    when (type) {
+                        Type.A -> {
+                            val ip = String(rec.data).trim()
+                            try {
+                                addRecord(ARecord(q.name, DClass.IN, 3600, java.net.InetAddress.getByName(ip)), Section.ANSWER)
+                            } catch (e: Exception) {
+                                Log.e("HNSGo", "Error parsing IP address: $ip", e)
+                            }
+                        }
+                        Type.CNAME -> {
+                            val target = String(rec.data).trim()
+                            val targetName = Name(target, Name.root)
+                            addRecord(CNAMERecord(q.name, DClass.IN, 3600, targetName), Section.ANSWER)
+                        }
+                        Type.TLSA -> {
+                            addRecord(TLSARecord(q.name, DClass.IN, 3600, 
+                                (rec.data[0].toInt() and 0xFF), 
+                                (rec.data[1].toInt() and 0xFF), 
+                                (rec.data[2].toInt() and 0xFF), 
+                                rec.data.sliceArray(3 until rec.data.size)), Section.ANSWER)
+                        }
+                    }
+                }
+            }
         }
         val wireData = resp.toWire()
         return NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())
     }
 
-    private fun forwardToDns(query: Message): Response {
+    private fun forwardToDns(query: org.xbill.DNS.Message): Response {
         return try {
             val questions = query.getSection(Section.QUESTION)
             val domainName = if (questions.isNotEmpty()) questions[0].name.toString() else "unknown"
-            Log.d("HNSGo", "Forwarding non-.hns query to regular DNS: $domainName")
+            Log.d("HNSGo", "Forwarding to regular DNS (not found in Handshake): $domainName")
             val response = runBlocking {
                 withContext(Dispatchers.IO) {
                     fallbackResolver.send(query)
@@ -213,9 +268,9 @@ class LocalDoHServer(private val dataDir: File) : NanoHTTPD(8443) {
     }
 
     private fun bad() = NanoHTTPD.newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Bad request")
-    private fun nxdomain(q: Message): Response {
+    private fun nxdomain(q: org.xbill.DNS.Message): Response {
         val questions = q.getSection(Section.QUESTION)
-        val resp = Message(q.header.id).apply {
+        val resp = org.xbill.DNS.Message(q.header.id).apply {
             header.setFlag(Flags.QR.toInt())
             header.rcode = Rcode.NXDOMAIN
             if (questions.isNotEmpty()) {
@@ -232,7 +287,7 @@ class LocalDoTServer(private val dataDir: File) {
     private var serverSocket: SSLServerSocket? = null
     private var running = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    var actualPort: Int = 1853 // Port above 1024 (no root required)
+    var actualPort: Int = Config.DOT_PORT // Port above 1024 (no root required)
 
     fun start() {
         try {
@@ -241,10 +296,10 @@ class LocalDoTServer(private val dataDir: File) {
             val factory = sslContext.serverSocketFactory
             val bindAddress = java.net.InetAddress.getByName("127.0.0.1")
             
-            // Use port 1853 (above 1024, no root required)
+            // Use Config.DOT_PORT (above 1024, no root required)
             // Note: Android Private DNS expects port 853, so this won't work with Private DNS directly
             // Users would need to use port forwarding or configure apps to use this port
-            val port = 1853
+            val port = Config.DOT_PORT
             Log.d("HNSGo", "Creating SSL server socket on 127.0.0.1:$port...")
             val sslServerSocket = factory.createServerSocket(port, 50, bindAddress) as SSLServerSocket
             sslServerSocket.needClientAuth = false
@@ -350,7 +405,7 @@ class LocalDoTServer(private val dataDir: File) {
                         input.readFully(queryBytes)
                         
                         // Parse and process DNS query
-                        val query = Message(queryBytes)
+                        val query = org.xbill.DNS.Message(queryBytes)
                         val questions = query.getSection(Section.QUESTION)
                         val domainName = if (questions.isNotEmpty()) questions[0].name.toString() else "unknown"
                         Log.d("HNSGo", "DoT: Processing query for: $domainName")
@@ -377,7 +432,7 @@ class LocalDoTServer(private val dataDir: File) {
         }
     }
 
-    private fun processDnsQuery(query: Message): Message {
+    private fun processDnsQuery(query: org.xbill.DNS.Message): org.xbill.DNS.Message {
         val questions = query.getSection(Section.QUESTION)
         if (questions.isEmpty()) {
             return createErrorResponse(query, Rcode.FORMERR)
@@ -388,13 +443,15 @@ class LocalDoTServer(private val dataDir: File) {
         val name = nameStr.lowercase(Locale.getDefault())
         val type = q.type
 
-        // Check if this is a .hns domain
-        if (!name.endsWith(".hns")) {
-            // Forward to regular DNS server
+        // Try Handshake resolution first
+        val records = runBlocking { SpvClient.resolve(name) }
+        
+        // If not found in Handshake, fall back to regular DNS
+        if (records == null) {
             return try {
                 val queryQuestions = query.getSection(Section.QUESTION)
                 val domainName = if (queryQuestions.isNotEmpty()) queryQuestions[0].name.toString() else "unknown"
-                Log.d("HNSGo", "DoT: Forwarding non-.hns query to regular DNS: $domainName")
+                Log.d("HNSGo", "DoT: Forwarding to regular DNS (not found in Handshake): $domainName")
                 runBlocking {
                     withContext(Dispatchers.IO) {
                         fallbackResolver.send(query)
@@ -406,28 +463,79 @@ class LocalDoTServer(private val dataDir: File) {
             }
         }
 
-        // Handle .hns domains through SPV
-        val records = runBlocking { SpvClient.resolve(name) } ?: return createNxDomainResponse(query)
-
-        val answer = records.find { it.type == type }?.let {
-            when (type) {
-                Type.A -> ARecord(q.name, DClass.IN, 3600, java.net.InetAddress.getByName(String(it.data)))
-                Type.TLSA -> TLSARecord(q.name, DClass.IN, 3600, (it.data[0].toInt() and 0xFF), (it.data[1].toInt() and 0xFF), (it.data[2].toInt() and 0xFF), it.data.sliceArray(3 until it.data.size))
-                else -> null
-            }
-        } ?: return createNxDomainResponse(query)
-
-        val resp = Message(query.header.id).apply {
+        // Build response with all relevant records
+        val resp = org.xbill.DNS.Message(query.header.id).apply {
             header.setFlag(Flags.QR.toInt())
             addRecord(q, Section.QUESTION)
-            addRecord(answer, Section.ANSWER)
+            
+            // Find records matching the query type
+            val matchingRecords = records.filter { it.type == type }
+            
+            if (matchingRecords.isEmpty()) {
+                // If no direct match, check for CNAME (which might redirect)
+                val cnameRecord = records.find { it.type == 5 } // CNAME
+                if (cnameRecord != null) {
+                    val cnameTarget = String(cnameRecord.data).trim()
+                    val cnameName = Name(cnameTarget, Name.root)
+                    addRecord(CNAMERecord(q.name, DClass.IN, 3600, cnameName), Section.ANSWER)
+                    
+                    // Try to resolve the CNAME target if querying for A record
+                    // CNAME targets are usually regular DNS domains, so use fallback resolver
+                    if (type == Type.A) {
+                        try {
+                            val targetQuery = org.xbill.DNS.Message().apply {
+                                addRecord(org.xbill.DNS.Record.newRecord(cnameName, Type.A, DClass.IN), Section.QUESTION)
+                            }
+                            val targetResponse = runBlocking {
+                                withContext(Dispatchers.IO) {
+                                    fallbackResolver.send(targetQuery)
+                                }
+                            }
+                            val targetAnswers = targetResponse.getSection(Section.ANSWER)
+                            targetAnswers.filterIsInstance<ARecord>().forEach { aRec ->
+                                addRecord(ARecord(cnameName, DClass.IN, aRec.ttl, aRec.address), Section.ANSWER)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("HNSGo", "DoT: Error resolving CNAME target: $cnameTarget", e)
+                        }
+                    }
+                } else {
+                    return createNxDomainResponse(query)
+                }
+            } else {
+                // Add matching records
+                matchingRecords.forEach { rec ->
+                    when (type) {
+                        Type.A -> {
+                            val ip = String(rec.data).trim()
+                            try {
+                                addRecord(ARecord(q.name, DClass.IN, 3600, java.net.InetAddress.getByName(ip)), Section.ANSWER)
+                            } catch (e: Exception) {
+                                Log.e("HNSGo", "DoT: Error parsing IP address: $ip", e)
+                            }
+                        }
+                        Type.CNAME -> {
+                            val target = String(rec.data).trim()
+                            val targetName = Name(target, Name.root)
+                            addRecord(CNAMERecord(q.name, DClass.IN, 3600, targetName), Section.ANSWER)
+                        }
+                        Type.TLSA -> {
+                            addRecord(TLSARecord(q.name, DClass.IN, 3600, 
+                                (rec.data[0].toInt() and 0xFF), 
+                                (rec.data[1].toInt() and 0xFF), 
+                                (rec.data[2].toInt() and 0xFF), 
+                                rec.data.sliceArray(3 until rec.data.size)), Section.ANSWER)
+                        }
+                    }
+                }
+            }
         }
         return resp
     }
 
-    private fun createNxDomainResponse(query: Message): Message {
+    private fun createNxDomainResponse(query: org.xbill.DNS.Message): org.xbill.DNS.Message {
         val questions = query.getSection(Section.QUESTION)
-        val resp = Message(query.header.id).apply {
+        val resp = org.xbill.DNS.Message(query.header.id).apply {
             header.setFlag(Flags.QR.toInt())
             header.rcode = Rcode.NXDOMAIN
             if (questions.isNotEmpty()) {
@@ -437,8 +545,8 @@ class LocalDoTServer(private val dataDir: File) {
         return resp
     }
 
-    private fun createErrorResponse(query: Message, rcode: Int): Message {
-        val resp = Message(query.header.id).apply {
+    private fun createErrorResponse(query: org.xbill.DNS.Message, rcode: Int): org.xbill.DNS.Message {
+        val resp = org.xbill.DNS.Message(query.header.id).apply {
             header.setFlag(Flags.QR.toInt())
             header.rcode = rcode
         }

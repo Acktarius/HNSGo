@@ -118,6 +118,8 @@ fun HnsGoScreen(act: MainActivity) {
     var syncMessage by remember { mutableStateOf("") }
     var showGuidance by remember { mutableStateOf(false) }
     var certInstalled by remember { mutableStateOf(false) }
+    var debugQueryResult by remember { mutableStateOf<String?>(null) }
+    var debugQueryStatus by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val typewriterFont = FontFamily.Monospace
     
@@ -137,10 +139,41 @@ fun HnsGoScreen(act: MainActivity) {
             scope.launch {
                 try {
                     Log.d("HNSGo", "Starting SPV sync...")
+                    // Configure resolver to use external Handshake resolver
+                    SpvClient.setResolver(Config.DEFAULT_RESOLVER_HOST, Config.DEFAULT_RESOLVER_PORT)
                     SpvClient.init(act.filesDir)
                     Log.d("HNSGo", "SPV sync completed successfully")
                     syncStatus = SyncStatus.SYNCED
                     syncMessage = "Sync complete"
+                    
+                    // Debug: Test DNS resolution for a Handshake domain
+                    debugQueryStatus = "Testing DNS resolution..."
+                    try {
+                        val testDomain = "website.conceal"
+                        Log.d("HNSGo", "Debug: Resolving $testDomain...")
+                        val records = SpvClient.resolve(testDomain)
+                        if (records != null) {
+                            val aRecord = records.find { it.type == 1 } // A record
+                            if (aRecord != null) {
+                                val ipAddress = String(aRecord.data)
+                                debugQueryResult = "$testDomain -> $ipAddress"
+                                debugQueryStatus = "✓ DNS resolution successful"
+                                Log.d("HNSGo", "Debug: $testDomain resolved to $ipAddress")
+                            } else {
+                                debugQueryResult = "$testDomain -> No A record found"
+                                debugQueryStatus = "⚠ No A record"
+                                Log.w("HNSGo", "Debug: $testDomain has no A record")
+                            }
+                        } else {
+                            debugQueryResult = "$testDomain -> NXDOMAIN"
+                            debugQueryStatus = "✗ Domain not found"
+                            Log.w("HNSGo", "Debug: $testDomain not found")
+                        }
+                    } catch (e: Exception) {
+                        debugQueryResult = "Error: ${e.message}"
+                        debugQueryStatus = "✗ Query failed"
+                        Log.e("HNSGo", "Debug: Error resolving test domain", e)
+                    }
                     
                     // Start DoH server after sync
                     Log.d("HNSGo", "Starting DoH service...")
@@ -157,6 +190,8 @@ fun HnsGoScreen(act: MainActivity) {
             syncStatus = SyncStatus.IDLE
             syncMessage = ""
             showGuidance = false
+            debugQueryResult = null
+            debugQueryStatus = ""
         }
     }
 
@@ -251,6 +286,53 @@ fun HnsGoScreen(act: MainActivity) {
                     else -> {}
                 }
 
+                // Debug DNS Query Result
+                if (showGuidance && syncStatus == SyncStatus.SYNCED && debugQueryResult != null) {
+                    Spacer(Modifier.height(32.dp))
+                    
+                    Card(
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(
+                                "Debug: DNS Query Test",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            
+                            Spacer(Modifier.height(8.dp))
+                            
+                            Text(
+                                debugQueryStatus,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                debugQueryResult ?: "",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 10.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                
                 // DNS Setup Guidance
                 if (showGuidance && syncStatus == SyncStatus.SYNCED) {
                     Spacer(Modifier.height(32.dp))
@@ -302,7 +384,7 @@ fun HnsGoScreen(act: MainActivity) {
                         Spacer(Modifier.height(4.dp))
                         
                         Text(
-                            "⚠️ Important: Private DNS won't work with 'localhost' because it requires port 853, but our DoT server uses port 1853 (no root). Use DoH (port 8443) instead, or root your device to use port 853.",
+                            "⚠️ Important: Private DNS won't work",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = typewriterFont,
                                 fontSize = 10.sp
@@ -449,6 +531,70 @@ fun HnsGoScreen(act: MainActivity) {
                     
                     Spacer(Modifier.height(16.dp))
                     
+                    // Firefox third-party CA instructions (critical for Firefox users)
+                    Text(
+                        "4. Enable Third-Party CA in Firefox (Required for Firefox)",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        "Firefox requires an additional step to trust user-installed CA certificates:",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "1. Open Firefox → Settings → About Firefox",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Text(
+                        "2. Tap the Firefox logo 7 times to enable Secret Settings",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Text(
+                        "3. Go back to Settings → Enable 'Use third party CA certificates'",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "⚠️ Without this step, Firefox will not trust the local DoH server certificate.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 10.sp
+                        ),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                    )
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
                     Text(
                         "5. Configure DNS (DoH recommended)",
                         style = MaterialTheme.typography.bodyMedium.copy(
@@ -479,7 +625,7 @@ fun HnsGoScreen(act: MainActivity) {
                             .padding(vertical = 4.dp)
                     ) {
                         Text(
-                            "https://127.0.0.1:8443/dns-query",
+                            "https://127.0.0.1:${Config.DOH_PORT}/dns-query",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = typewriterFont,
                                 fontSize = 11.sp
@@ -489,7 +635,7 @@ fun HnsGoScreen(act: MainActivity) {
                                 .weight(1f)
                                 .clickable {
                                     val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:8443/dns-query")
+                                    val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                                     clipboard.setPrimaryClip(clip)
                                     Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
                                     Log.d("HNSGo", "DoH URL copied to clipboard")
@@ -498,7 +644,7 @@ fun HnsGoScreen(act: MainActivity) {
                         IconButton(
                             onClick = {
                                 val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("DoH Endpoint", "http://127.0.0.1:8443/dns-query")
+                                val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                                 clipboard.setPrimaryClip(clip)
                                 Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
                                 Log.d("HNSGo", "DoH URL copied to clipboard")
@@ -558,7 +704,7 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(16.dp))
                     
                     Text(
-                        "6. (Optional) Enable DANE in Firefox",
+                        "6. (Optional) Advanced: DANE Support",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = typewriterFont,
                             fontSize = 14.sp
@@ -569,12 +715,12 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        "Firefox: about:config > security.dane.enabled = true",
+                        "Note: DANE (DNS-Based Authentication of Named Entities) configuration is not available in Firefox for Android. This feature is primarily for desktop browsers.",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                     )
                 }
             }
@@ -639,7 +785,7 @@ fun HnsGoScreen(act: MainActivity) {
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                     )
                     Text(
-                        "Use DoH endpoint (https://127.0.0.1:8443/dns-query) in apps that support it.",
+                        "Use DoH endpoint (https://127.0.0.1:${Config.DOH_PORT}/dns-query) in apps that support it.",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont
                         ),

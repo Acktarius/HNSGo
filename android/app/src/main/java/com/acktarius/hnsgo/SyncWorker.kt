@@ -10,6 +10,8 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
+            // Configure resolver to use external Handshake resolver
+            SpvClient.setResolver(Config.DEFAULT_RESOLVER_HOST, Config.DEFAULT_RESOLVER_PORT)
             SpvClient.init(applicationContext.filesDir)
             Result.success()
         } catch (e: Exception) {
