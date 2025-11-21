@@ -140,44 +140,58 @@ fun HnsGoScreen(act: MainActivity) {
                 try {
                     Log.d("HNSGo", "Starting SPV sync...")
                     // Configure resolver to use external Handshake resolver
-                    SpvClient.setResolver(Config.DEFAULT_RESOLVER_HOST, Config.DEFAULT_RESOLVER_PORT)
-                    SpvClient.init(act.filesDir)
+                    SpvClient.setResolver(Config.DEBUG_RESOLVER_HOST, Config.DEBUG_RESOLVER_PORT)
+                    SpvClient.init(act.filesDir, act)
                     Log.d("HNSGo", "SPV sync completed successfully")
                     syncStatus = SyncStatus.SYNCED
                     syncMessage = "Sync complete"
                     
                     // Debug: Test DNS resolution for a Handshake domain
-                    debugQueryStatus = "Testing DNS resolution..."
-                    try {
-                        val testDomain = "website.conceal"
-                        Log.d("HNSGo", "Debug: Resolving $testDomain...")
-                        val records = SpvClient.resolve(testDomain)
-                        if (records != null) {
-                            val aRecord = records.find { it.type == 1 } // A record
-                            if (aRecord != null) {
-                                val ipAddress = String(aRecord.data)
-                                debugQueryResult = "$testDomain -> $ipAddress"
-                                debugQueryStatus = "✓ DNS resolution successful"
-                                Log.d("HNSGo", "Debug: $testDomain resolved to $ipAddress")
+                    debugQueryStatus = "Waiting for header sync..."
+                    // Wait a bit for sync to start, then check if we have enough headers
+                    kotlinx.coroutines.delay(2000) // Give sync 2 seconds to start
+                    
+                    // Check if we have enough headers before attempting resolution
+                    val minRequiredHeight = Config.CHECKPOINT_HEIGHT + 1000
+                    val currentHeight = SpvClient.getChainHeight()
+                    if (currentHeight < minRequiredHeight) {
+                        debugQueryStatus = "⚠ Waiting for sync (height: $currentHeight, need: $minRequiredHeight)"
+                        debugQueryResult = "Please wait for header sync to complete before resolving domains"
+                        Log.w("HNSGo", "Debug: Not enough headers synced yet (height: $currentHeight, required: $minRequiredHeight)")
+                        Log.w("HNSGo", "Debug: Skipping test resolution until sync completes")
+                    } else {
+                        debugQueryStatus = "Testing DNS resolution..."
+                        try {
+                            val testDomain = "website.conceal"
+                            Log.d("HNSGo", "Debug: Resolving $testDomain... (chain height: $currentHeight)")
+                            val records = SpvClient.resolve(testDomain)
+                            if (records != null) {
+                                val aRecord = records.find { it.type == 1 } // A record
+                                if (aRecord != null) {
+                                    val ipAddress = String(aRecord.data)
+                                    debugQueryResult = "$testDomain -> $ipAddress"
+                                    debugQueryStatus = "✓ DNS resolution successful"
+                                    Log.d("HNSGo", "Debug: $testDomain resolved to $ipAddress")
+                                } else {
+                                    debugQueryResult = "$testDomain -> No A record found"
+                                    debugQueryStatus = "⚠ No A record"
+                                    Log.w("HNSGo", "Debug: $testDomain has no A record")
+                                }
                             } else {
-                                debugQueryResult = "$testDomain -> No A record found"
-                                debugQueryStatus = "⚠ No A record"
-                                Log.w("HNSGo", "Debug: $testDomain has no A record")
+                                debugQueryResult = "$testDomain -> NXDOMAIN"
+                                debugQueryStatus = "✗ Domain not found"
+                                Log.w("HNSGo", "Debug: $testDomain not found")
                             }
-                        } else {
-                            debugQueryResult = "$testDomain -> NXDOMAIN"
-                            debugQueryStatus = "✗ Domain not found"
-                            Log.w("HNSGo", "Debug: $testDomain not found")
+                        } catch (e: Exception) {
+                            debugQueryResult = "Error: ${e.message}"
+                            debugQueryStatus = "✗ Query failed"
+                            Log.e("HNSGo", "Debug: Error resolving test domain", e)
                         }
-                    } catch (e: Exception) {
-                        debugQueryResult = "Error: ${e.message}"
-                        debugQueryStatus = "✗ Query failed"
-                        Log.e("HNSGo", "Debug: Error resolving test domain", e)
                     }
                     
                     // Start DoH server after sync
                     Log.d("HNSGo", "Starting DoH service...")
-            ContextCompat.startForegroundService(act, Intent(act, DohService::class.java))
+                    ContextCompat.startForegroundService(act, Intent(act, DohService::class.java))
                     showGuidance = true
                 } catch (e: Exception) {
                     Log.e("HNSGo", "Error during sync or service start", e)
@@ -230,7 +244,11 @@ fun HnsGoScreen(act: MainActivity) {
             ) {
                 Switch(
                     checked = enabled,
-                    onCheckedChange = { enabled = it }
+                    onCheckedChange = { newValue ->
+                        enabled = newValue
+                        // Explicitly handle state change to avoid OVERRIDE_UNSET warning
+                        Log.d("HNSGo", "Switch state changed to: $newValue")
+                    }
                 )
                 Spacer(Modifier.width(16.dp))
                 Text(

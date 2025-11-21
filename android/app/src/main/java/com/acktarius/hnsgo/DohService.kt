@@ -42,8 +42,8 @@ class DohService : Service() {
                 try {
                     Log.d("HNSGo", "Initializing SPV client in service...")
                     // Configure resolver to use external Handshake resolver
-                    SpvClient.setResolver(Config.DEFAULT_RESOLVER_HOST, Config.DEFAULT_RESOLVER_PORT)
-                    SpvClient.init(filesDir)
+                    SpvClient.setResolver(Config.DEBUG_RESOLVER_HOST, Config.DEBUG_RESOLVER_PORT)
+                    SpvClient.init(filesDir, this@DohService)
                     
                     // Start DoH server
                     Log.d("HNSGo", "Creating LocalDoHServer...")

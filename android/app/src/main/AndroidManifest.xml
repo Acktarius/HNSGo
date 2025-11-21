@@ -8,7 +8,9 @@
         android:allowBackup="true"
         android:label="HNS Go"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.HNSGo">
+        android:theme="@style/Theme.HNSGo"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
