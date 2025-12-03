@@ -24,6 +24,7 @@ object Config {
     const val CHECKPOINT_WINDOW = 2000  // HSK_STORE_CHECKPOINT_WINDOW from constants.h (exact match)
     const val CHECKPOINT_HEADERS_COUNT = 150  // HSK_STORE_HEADERS_COUNT from store.h (exact match)
     const val TREE_INTERVAL = 36  // HSK_TREE_INTERVAL from constants.h
+    const val MAX_VALID_HEIGHT = 500000  // Maximum valid blockchain height (sanity check to prevent corrupted data)
     
     // Protocol Constants (from hnsd constants.h)
     const val PROTO_VERSION = 1  // HSK_PROTO_VERSION

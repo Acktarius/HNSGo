@@ -158,13 +158,16 @@ object NameResolver {
         android.util.Log.d("HNSGo", "NameResolver: Querying P2P peers for name hash...")
         
         try {
-            val nameQueryResult = SpvP2P.queryName(nameHash, latestHeader.treeRoot, chainHeight)
+            // CRITICAL: Use nameRoot (name_root in hnsd) for getproof queries
+            // hnsd uses pool->chain.tip->name_root for getproof queries (see pool.c:573)
+            val nameQueryResult = SpvP2P.queryName(nameHash, latestHeader.nameRoot, chainHeight)
             when (nameQueryResult) {
                 is SpvP2P.NameQueryResult.Success -> {
                     val (resourceRecords, proof) = nameQueryResult.records to nameQueryResult.proof
                     android.util.Log.d("HNSGo", "NameResolver: P2P query success (${resourceRecords.size} records, proof: ${proof != null})")
                     
-                    if (verifyDomainProof(nameHash, emptyList(), proof, latestHeader.treeRoot)) {
+                    // Use nameRoot (name_root) for proof verification, matching hnsd
+                    if (verifyDomainProof(nameHash, emptyList(), proof, latestHeader.nameRoot)) {
                         val records = parseResourceRecords(resourceRecords)
                         if (records.isNotEmpty()) {
                             android.util.Log.d("HNSGo", "NameResolver: Successfully resolved $name from blockchain: ${records.size} records")
@@ -301,7 +304,7 @@ object NameResolver {
         nameHash: ByteArray,
         records: List<com.acktarius.hnsgo.Record>,
         proof: ByteArray?,
-        treeRoot: ByteArray
+        nameRoot: ByteArray
     ): Boolean {
         android.util.Log.d("HNSGo", "NameResolver: Verifying domain proof")
         
@@ -310,7 +313,7 @@ object NameResolver {
             return false
         }
         
-        if (nameHash.size != 32 || treeRoot.size != 32) {
+        if (nameHash.size != 32 || nameRoot.size != 32) {
             android.util.Log.w("HNSGo", "NameResolver: Invalid hash size")
             return false
         }
@@ -331,7 +334,7 @@ object NameResolver {
                 return false
             }
             
-            val isValid = calculatedRoot.contentEquals(treeRoot)
+            val isValid = calculatedRoot.contentEquals(nameRoot)
             
             if (isValid) {
                 android.util.Log.d("HNSGo", "NameResolver: Domain proof verified successfully")

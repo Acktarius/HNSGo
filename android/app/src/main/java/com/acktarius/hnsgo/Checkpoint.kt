@@ -304,7 +304,7 @@ object Checkpoint {
                         val hashHex = headerHash.joinToString("") { "%02x".format(it) }
                         val hashIsZero = headerHash.all { it == 0.toByte() }
                         val prevBlockHex = header.prevBlock.take(16).joinToString("") { "%02x".format(it) }
-                        val nameRootHex = header.merkleRoot.take(16).joinToString("") { "%02x".format(it) }
+                        val nameRootHex = header.nameRoot.take(16).joinToString("") { "%02x".format(it) }
                         val maskHex = header.mask.take(16).joinToString("") { "%02x".format(it) }
                         val headerHeight = CHECKPOINT_HEIGHT + i
                         Log.e("HNSGo", "Checkpoint:parseCheckpoint: Header $i (h=$headerHeight) hash=$hashHex zero=$hashIsZero prevBlock=$prevBlockHex nameRoot=$nameRootHex mask=$maskHex n=${header.nonce} t=${header.time} v=${header.version} b=${header.bits}")
@@ -394,9 +394,9 @@ object Checkpoint {
         return Header(
             version = version,
             prevBlock = prevBlock,
-            merkleRoot = nameRoot,  // name_root in checkpoint = merkleRoot in Header (for hash calculation)
+            nameRoot = nameRoot,  // name_root in checkpoint = nameRoot in Header (matches hnsd naming)
             witnessRoot = witnessRoot,
-            treeRoot = merkleRoot,  // merkle_root in checkpoint = treeRoot in Header (for hash calculation)
+            merkleRoot = merkleRoot,  // merkle_root in checkpoint = merkleRoot in Header (matches hnsd naming)
             reservedRoot = reservedRoot,
             time = time,
             bits = bits,

@@ -223,7 +223,9 @@ internal object ProtocolHandler {
             System.arraycopy(nameRoot, 0, this, 0, 32)
             System.arraycopy(nameHash, 0, this, 32, 32)
         }
-        Log.d("HNSGo", "ProtocolHandler: Sending getproof")
+        val nameRootHex = nameRoot.take(16).joinToString("") { "%02x".format(it) }
+        val nameHashHex = nameHash.take(16).joinToString("") { "%02x".format(it) }
+        Log.d("HNSGo", "ProtocolHandler: Sending getproof (nameRoot: $nameRootHex..., nameHash: $nameHashHex...)")
         messageHandler.sendMessage(output, "getproof", payload)
     }
     

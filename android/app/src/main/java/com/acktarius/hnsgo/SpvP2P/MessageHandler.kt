@@ -246,9 +246,9 @@ internal object MessageHandler {
         return Header(
             version = version,
             prevBlock = prevBlock,
-            merkleRoot = nameRoot,
+            nameRoot = nameRoot,
             witnessRoot = witnessRoot,
-            treeRoot = merkleRoot,
+            merkleRoot = merkleRoot,
             reservedRoot = reservedRoot,
             time = time,
             bits = bits,

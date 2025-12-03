@@ -98,9 +98,10 @@ class DohService : Service() {
                         // Continue without DoT - DoH will still work
                     }
                     
-                    // Now that servers are ready, test DNS resolution
+                    // Now that servers are ready, send status update and test DNS resolution
                     // This ensures we test when the full system is ready
                     Log.d("HNSGo", "DoH/DoT servers ready - testing DNS resolution...")
+                    sendDebugResult("DoH server ready", "Server running on https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                     scope.launch {
                         testDnsResolution()
                     }
@@ -195,7 +196,10 @@ class DohService : Service() {
                 
                 if (networkHeight != null) {
                     val behind = networkHeight - currentHeight
-                    if (behind <= SYNC_THRESHOLD_BLOCKS) {
+                    // CRITICAL: Match HeaderSync logic - allow being 2 blocks ahead (network propagation delays)
+                    val isCaughtUp = behind >= -2 && behind <= SYNC_THRESHOLD_BLOCKS
+                    
+                    if (isCaughtUp) {
                         Log.d("HNSGo", "DohService: Sync complete! (height: $currentHeight, network: $networkHeight, behind: $behind)")
                         break
                     } else {
@@ -207,6 +211,7 @@ class DohService : Service() {
                 } else {
                     // Network height not available yet, wait a bit
                     Log.d("HNSGo", "DohService: Network height not available yet, waiting...")
+                    sendDebugResult("Waiting for network height...", null)
                     delay(SYNC_CHECK_DELAY_MS)
                     attempts++
                 }
@@ -218,7 +223,10 @@ class DohService : Service() {
             
             if (networkHeight != null) {
                 val behind = networkHeight - currentHeight
-                if (behind > SYNC_THRESHOLD_BLOCKS) {
+                // CRITICAL: Match HeaderSync logic - allow being 2 blocks ahead (network propagation delays)
+                val isCaughtUp = behind >= -2 && behind <= SYNC_THRESHOLD_BLOCKS
+                
+                if (!isCaughtUp) {
                     val status = "⚠ Still syncing (height: $currentHeight, network: $networkHeight, behind: $behind)"
                     val result = "Waiting for full sync before testing. Resolution may fail if too far behind."
                     sendDebugResult(status, result)

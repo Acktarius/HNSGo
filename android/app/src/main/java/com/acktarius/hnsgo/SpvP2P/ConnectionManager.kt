@@ -305,36 +305,67 @@ internal object ConnectionManager {
             
             Log.d("HNSGo", "ConnectionManager: Starting handshake for name query to $host:$port (height: $chainHeight)")
             protocolHandler.sendVersion(output, host, port, chainHeight, messageHandler)
-            val (handshakeSuccess, _) = protocolHandler.handshake(input, output, messageHandler)
+            val (handshakeSuccess, peerHeight) = protocolHandler.handshake(input, output, messageHandler)
             if (!handshakeSuccess) {
-                Log.w("HNSGo", "ConnectionManager: Handshake failed for name query")
+                Log.w("HNSGo", "ConnectionManager: Handshake failed for name query to $host:$port (peer may not support name queries or closed connection)")
                 return@withContext NameQueryResult.Error
             }
             
-            Log.d("HNSGo", "ConnectionManager: Sending getproof for name hash")
+            Log.d("HNSGo", "ConnectionManager: Handshake successful with $host:$port (peer height: $peerHeight)")
+            
+            val nameHashHex = nameHash.take(16).joinToString("") { "%02x".format(it) }
+            Log.d("HNSGo", "ConnectionManager: Sending getproof for name hash: $nameHashHex... (nameRoot from height: $chainHeight)")
             protocolHandler.sendGetProof(output, nameHash, nameRoot, messageHandler)
             
             var proofMessage: P2PMessage? = null
             var attempts = 0
-            val maxAttempts = 5
+            val maxAttempts = 20  // Allow more attempts to handle ping/pong messages
             
             while (attempts < maxAttempts && proofMessage == null) {
                 val message = messageHandler.receiveMessage(input)
                 if (message == null) {
+                    Log.w("HNSGo", "ConnectionManager: EOF or null message received while waiting for proof")
                     break
                 }
                 
                 Log.d("HNSGo", "ConnectionManager: Received message: ${message.command}")
                 
-                if (message.command == "proof") {
-                    proofMessage = message
-                    break
-                } else if (message.command == "notfound") {
-                    Log.d("HNSGo", "ConnectionManager: Domain not found (valid protocol response)")
-                    return@withContext NameQueryResult.NotFound
-                } else {
-                    attempts++
+                when (message.command) {
+                    "proof" -> {
+                        proofMessage = message
+                        break
+                    }
+                    "notfound" -> {
+                        Log.d("HNSGo", "ConnectionManager: Domain not found (valid protocol response)")
+                        return@withContext NameQueryResult.NotFound
+                    }
+                    "ping" -> {
+                        // Handle ping (peer sends ping to keep connection alive)
+                        try {
+                            val nonce = java.nio.ByteBuffer.wrap(message.payload).order(java.nio.ByteOrder.LITTLE_ENDIAN).long
+                            Log.d("HNSGo", "ConnectionManager: Received ping (nonce=$nonce), sending pong")
+                            val pongPayload = ByteArray(8).apply {
+                                java.nio.ByteBuffer.wrap(this).order(java.nio.ByteOrder.LITTLE_ENDIAN).putLong(nonce)
+                            }
+                            messageHandler.sendMessage(output, "pong", pongPayload)
+                            // Continue waiting for proof
+                        } catch (e: Exception) {
+                            Log.w("HNSGo", "ConnectionManager: Error handling ping", e)
+                        }
+                    }
+                    "pong" -> {
+                        // Response to our ping (if any) - just continue waiting
+                        Log.d("HNSGo", "ConnectionManager: Received pong, continuing to wait for proof")
+                    }
+                    "addr" -> {
+                        // Peer may send addr messages - just continue waiting
+                        Log.d("HNSGo", "ConnectionManager: Received addr message, continuing to wait for proof")
+                    }
+                    else -> {
+                        Log.d("HNSGo", "ConnectionManager: Received unexpected message: ${message.command}, continuing to wait for proof")
+                    }
                 }
+                attempts++
             }
             
             if (proofMessage == null) {

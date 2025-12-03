@@ -60,8 +60,8 @@ object SpvP2P {
     /**
      * Query peers for a Handshake domain name
      * @param nameHash 32-byte name hash
-     * @param nameRoot 32-byte tree_root from latest header (treeRoot = merkle_root in hnsd wire format)
-     *                 This is the root used for getproof queries, NOT name_root
+     * @param nameRoot 32-byte name_root from latest header (matches hnsd naming)
+     *                 This is the root used for getproof queries (see hnsd pool.c:573: pool->chain.tip->name_root)
      * @param chainHeight Current chain height (for version message)
      * @return NameQueryResult indicating success, not found, or error
      */

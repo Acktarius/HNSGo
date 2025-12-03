@@ -34,7 +34,6 @@ private data class HashWrapper(val hash: ByteArray) {
  */
 object HeaderSync {
     private const val MAX_HEIGHT_DIFF = 10000
-    private const val MAX_VALID_HEIGHT = 500000
     
     // HashSet for O(1) duplicate detection (matching hnsd's chain->hashes approach)
     private val headerHashes = Collections.synchronizedSet(HashSet<HashWrapper>())
@@ -89,7 +88,7 @@ object HeaderSync {
             val hashHex = lastHash.joinToString("") { byte -> "%02x".format(byte) }
             val hashIsZero = lastHash.all { byte -> byte == 0.toByte() }
             val prevBlockHex = lastHeader.prevBlock.take(16).joinToString("") { byte -> "%02x".format(byte) }
-            val nameRootHex = lastHeader.merkleRoot.take(16).joinToString("") { byte -> "%02x".format(byte) }
+            val nameRootHex = lastHeader.nameRoot.take(16).joinToString("") { byte -> "%02x".format(byte) }
             val maskHex = lastHeader.mask.take(16).joinToString("") { byte -> "%02x".format(byte) }
             android.util.Log.e("HNSGo", "HeaderSync: Tip header hash=$hashHex zero=$hashIsZero prevBlock=$prevBlockHex nameRoot=$nameRootHex mask=$maskHex")
         }
@@ -198,8 +197,10 @@ object HeaderSync {
             val behind = networkHeightFromSync - finalHeight
             if (behind > 0) {
                 android.util.Log.d("HNSGo", "HeaderSync: Network height: $networkHeightFromSync, our height: $finalHeight (behind by $behind blocks)")
+            } else if (behind < 0) {
+                android.util.Log.d("HNSGo", "HeaderSync: Network height: $networkHeightFromSync, our height: $finalHeight (ahead by ${-behind} blocks - within tolerance)")
             } else {
-                android.util.Log.d("HNSGo", "HeaderSync: Caught up with network!")
+                android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (exact match)")
             }
         }
         
@@ -256,8 +257,16 @@ object HeaderSync {
             
             if (networkHeight != null) {
                 val behind = networkHeight - currentHeight
-                if (behind <= 10) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (height: $currentHeight, network: $networkHeight)")
+                // CRITICAL: Check if we're caught up (within 10 blocks behind, or at most 2 blocks ahead)
+                // Allow 2 blocks ahead to account for network propagation delays (peer might report slightly stale height)
+                val isCaughtUp = behind >= -2 && behind <= 10
+                
+                if (isCaughtUp) {
+                    if (behind < 0) {
+                        android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (height: $currentHeight, network: $networkHeight, ahead by ${-behind} blocks - within tolerance)")
+                    } else {
+                        android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (height: $currentHeight, network: $networkHeight, behind by $behind blocks)")
+                    }
                     break
                 }
                 if (headersReceived) {

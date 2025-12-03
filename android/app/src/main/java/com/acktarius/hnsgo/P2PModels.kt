@@ -9,9 +9,9 @@ import java.nio.ByteOrder
 data class Header(
     val version: Int,
     val prevBlock: ByteArray,
-    val merkleRoot: ByteArray,  // This is name_root in hnsd
+    val nameRoot: ByteArray,  // name_root in hnsd (matches hnsd naming)
     val witnessRoot: ByteArray,
-    val treeRoot: ByteArray,  // This is merkle_root in hnsd
+    val merkleRoot: ByteArray,  // merkle_root in hnsd (matches hnsd naming)
     val reservedRoot: ByteArray,
     val time: Long,
     val bits: Int,
@@ -27,11 +27,11 @@ data class Header(
             nonce = nonce,
             time = time,
             prevBlock = prevBlock,
-            nameRoot = merkleRoot,  // merkleRoot in Header = name_root in hnsd
+            nameRoot = nameRoot,  // nameRoot in Header = name_root in hnsd
             extraNonce = extraNonce,
             reservedRoot = reservedRoot,
             witnessRoot = witnessRoot,
-            merkleRoot = treeRoot,  // treeRoot in Header = merkle_root in hnsd
+            merkleRoot = merkleRoot,  // merkleRoot in Header = merkle_root in hnsd
             version = version,
             bits = bits,
             mask = mask
@@ -44,16 +44,15 @@ data class Header(
         // Match hnsd wire format exactly (236 bytes):
         // nonce(4) + time(8) + prevBlock(32) + nameRoot(32) + extraNonce(24) + 
         // reservedRoot(32) + witnessRoot(32) + merkleRoot(32) + version(4) + bits(4) + mask(32) = 236 bytes
-        // Note: merkleRoot in Header = name_root in hnsd, treeRoot in Header = merkle_root in hnsd
         val buffer = ByteBuffer.allocate(236).order(ByteOrder.LITTLE_ENDIAN)
         buffer.putInt(nonce)
         buffer.putLong(time)
         buffer.put(prevBlock)
-        buffer.put(merkleRoot)  // name_root in hnsd
+        buffer.put(nameRoot)  // name_root in hnsd
         buffer.put(extraNonce)
         buffer.put(reservedRoot)
         buffer.put(witnessRoot)
-        buffer.put(treeRoot)  // merkle_root in hnsd
+        buffer.put(merkleRoot)  // merkle_root in hnsd
         buffer.putInt(version)
         buffer.putInt(bits)
         buffer.put(mask)  // CRITICAL: Include mask for correct hash calculation!

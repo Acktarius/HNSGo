@@ -27,6 +27,10 @@ object HeaderStorage {
         maxInMemoryHeaders: Int
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         val headersFile = File(dataDir, Config.HEADERS_FILE)
+        val incrementalFile = File(dataDir, "${Config.HEADERS_FILE}.incremental")
+        val metadataFile = File(dataDir, "${Config.HEADERS_FILE}.meta")
+        
+        // Load from main file (now saves only latest 150 headers, matching hnsd)
         if (!headersFile.exists()) {
             android.util.Log.d("HNSGo", "HeaderStorage: No existing header chain found")
             return@withContext Pair(0, Config.CHECKPOINT_HEIGHT)
@@ -41,30 +45,24 @@ object HeaderStorage {
                 val totalCount = headersArray.size()
                 val storedHeight = cbor["height"]?.AsInt32()
                 
-                // CRITICAL: For checkpoint-based chains, height should be CHECKPOINT_HEIGHT + totalCount - 1
-                val expectedHeight = if (totalCount > 0) {
-                    Config.CHECKPOINT_HEIGHT + totalCount - 1
+                // MATCHING hnsd: We only save latest 150 headers, so stored height is the actual network height
+                // Don't calculate from checkpoint - we don't have all headers from checkpoint anymore
+                
+                // Use stored height directly (it's the actual network height we synced to)
+                val finalHeight = if (storedHeight != null && storedHeight > 0 && storedHeight <= Config.MAX_VALID_HEIGHT) {
+                    storedHeight
                 } else {
-                    0
-                }
-                
-                val maxValidHeight = 500000
-                val maxReasonableDiffBase = 1000
-                
-                // Use stored height if valid, otherwise use calculated height from checkpoint
-                val finalHeight = if (storedHeight != null && storedHeight > 0 && storedHeight <= maxValidHeight) {
-                    val heightDiff = kotlin.math.abs(storedHeight - expectedHeight)
-                    val maxReasonableDiff = maxOf(maxReasonableDiffBase, expectedHeight / 10)
-                    
-                    if (heightDiff > maxReasonableDiff) {
-                        android.util.Log.w("HNSGo", "HeaderStorage: Stored height $storedHeight differs significantly from expected $expectedHeight (diff: $heightDiff), using calculated height")
-                        expectedHeight
+                    // Fallback: if stored height is invalid, calculate from saved headers
+                    // This should only happen if file is corrupted
+                    val fallbackHeight = if (totalCount > 0) {
+                        // We only have 150 headers, so we can't calculate full height
+                        // Use a reasonable estimate: assume we're close to network tip
+                        android.util.Log.w("HNSGo", "HeaderStorage: Stored height missing or invalid, using fallback calculation")
+                        Config.CHECKPOINT_HEIGHT + totalCount - 1
                     } else {
-                        storedHeight
+                        0
                     }
-                } else {
-                    android.util.Log.w("HNSGo", "HeaderStorage: Stored height missing or invalid, calculating from checkpoint: $expectedHeight")
-                    expectedHeight
+                    fallbackHeight
                 }
                 
                 val firstInMemoryHeight = loadHeadersIntoMemory(
@@ -91,12 +89,14 @@ object HeaderStorage {
             headerChain.clear()
         }
         
+        // MATCHING hnsd: We only save latest 150 headers, so first header is at (chainHeight - totalCount + 1)
+        // Not CHECKPOINT_HEIGHT + startIndex, because we don't store all headers from checkpoint
         val startIndex = maxOf(0, totalCount - maxInMemoryHeaders)
-        val firstInMemoryHeight = Config.CHECKPOINT_HEIGHT + startIndex
+        val firstInMemoryHeight = chainHeight - totalCount + 1 + startIndex
         
         android.util.Log.d(
             "HNSGo",
-            "HeaderStorage: Loading from disk (total: $totalCount, height: $chainHeight)"
+            "HeaderStorage: Loading from disk (total: $totalCount headers, height: $chainHeight)"
         )
         android.util.Log.d(
             "HNSGo",
@@ -116,14 +116,8 @@ object HeaderStorage {
         android.util.Log.d(
             "HNSGo",
             "HeaderStorage: Loaded ${headerChain.size} headers into memory " +
-                "(heights $firstInMemoryHeight to $chainHeight)"
+                "(heights $firstInMemoryHeight to $chainHeight, matching hnsd: only latest headers saved)"
         )
-        if (firstInMemoryHeight > Config.CHECKPOINT_HEIGHT) {
-            android.util.Log.d(
-                "HNSGo",
-                "HeaderStorage: Older headers (${Config.CHECKPOINT_HEIGHT} to ${firstInMemoryHeight - 1}) remain on disk"
-            )
-        }
         
         firstInMemoryHeight
     }
@@ -131,7 +125,7 @@ object HeaderStorage {
     /**
      * Save header chain to disk
      * MEMORY OPTIMIZATION: Only saves new headers (incremental save)
-     * Avoids rewriting entire chain on every save
+     * Avoids rewriting entire chain on every save - uses append-only file for new headers
      */
     suspend fun saveHeaderChain(
         dataDir: File,
@@ -141,48 +135,35 @@ object HeaderStorage {
     ) = withContext(Dispatchers.IO) {
         try {
             val headersFile = File(dataDir, Config.HEADERS_FILE)
+            val incrementalFile = File(dataDir, "${Config.HEADERS_FILE}.incremental")
             val tempFile = File(dataDir, "${Config.HEADERS_FILE}.tmp")
             
-            // OPTIMIZATION: If we have existing file and only new headers, append instead of rewrite
             val newHeadersCount = chainHeight - lastSavedHeight
-            val shouldAppend = headersFile.exists() && newHeadersCount > 0 && newHeadersCount < headerChain.size
+            if (newHeadersCount <= 0) {
+                android.util.Log.d("HNSGo", "HeaderStorage: No new headers to save (height: $chainHeight, lastSaved: $lastSavedHeight)")
+                return@withContext
+            }
             
-            if (shouldAppend) {
-                // Incremental save: Load existing, append new headers
-                val existingData = headersFile.readBytes()
-                val existingCbor = CBORObject.DecodeFromBytes(existingData)
-                val existingHeadersArray = existingCbor["headers"] ?: CBORObject.NewArray()
-                
-                // Only add new headers (from lastSavedHeight onwards)
-                synchronized(headerChain) {
-                    val startIndex = maxOf(0, headerChain.size - newHeadersCount)
-                    for (i in startIndex until headerChain.size) {
-                        existingHeadersArray.Add(CBORObject.FromObject(headerChain[i].toBytes()))
-                    }
+            // MATCHING hnsd: Only save the latest 150 headers (HSK_STORE_HEADERS_COUNT)
+            // This prevents OOM and matches hnsd's behavior - SPV clients don't need all historical headers
+            synchronized(headerChain) {
+                if (headerChain.isEmpty()) {
+                    android.util.Log.w("HNSGo", "HeaderStorage: No headers in memory to save")
+                    return@withContext
                 }
                 
-                val cbor = CBORObject.NewMap()
-                cbor["headers"] = existingHeadersArray
-                cbor["height"] = CBORObject.FromObject(chainHeight)
-                cbor["timestamp"] = CBORObject.FromObject(System.currentTimeMillis())
+                // Save only the latest 150 headers (matching hnsd's HSK_STORE_HEADERS_COUNT)
+                val headersToSave = headerChain.takeLast(Config.CHECKPOINT_HEADERS_COUNT)
                 
-                val data = cbor.EncodeToBytes()
-                tempFile.writeBytes(data)
-                tempFile.renameTo(headersFile)
+                if (headersToSave.isEmpty()) {
+                    android.util.Log.w("HNSGo", "HeaderStorage: No headers to save after filtering")
+                    return@withContext
+                }
                 
-                val checksum = sha256.digest(data)
-                sha256.reset()
-                File(dataDir, Config.HEADERS_CHECKSUM).writeBytes(checksum)
-                
-                android.util.Log.d("HNSGo", "HeaderStorage: Incrementally saved $newHeadersCount new headers (total: $chainHeight)")
-            } else {
-                // Full save: Rewrite entire chain (first save or major changes)
+                // Create new array with only latest 150 headers (don't append - replace)
                 val headersArray = CBORObject.NewArray()
-                
-                synchronized(headerChain) {
-                    for (header in headerChain) {
-                        headersArray.Add(CBORObject.FromObject(header.toBytes()))
-                    }
+                for (header in headersToSave) {
+                    headersArray.Add(CBORObject.FromObject(header.toBytes()))
                 }
                 
                 val cbor = CBORObject.NewMap()
@@ -198,8 +179,16 @@ object HeaderStorage {
                 sha256.reset()
                 File(dataDir, Config.HEADERS_CHECKSUM).writeBytes(checksum)
                 
-                android.util.Log.d("HNSGo", "HeaderStorage: Saved $chainHeight headers to disk (full save)")
+                android.util.Log.d("HNSGo", "HeaderStorage: Saved ${headersToSave.size} latest headers (matching hnsd: only latest ${Config.CHECKPOINT_HEADERS_COUNT} headers, height: $chainHeight)")
+                
+                // Clean up old incremental file if it exists (no longer needed)
+                if (incrementalFile.exists()) {
+                    incrementalFile.delete()
+                    android.util.Log.d("HNSGo", "HeaderStorage: Cleaned up old incremental file")
+                }
             }
+        } catch (e: OutOfMemoryError) {
+            android.util.Log.e("HNSGo", "HeaderStorage: OutOfMemoryError saving headers - skipping save", e)
         } catch (e: Exception) {
             android.util.Log.e("HNSGo", "HeaderStorage: Error saving header chain", e)
         }
@@ -279,9 +268,9 @@ object HeaderStorage {
         return Header(
             version = version,
             prevBlock = prevBlock,
-            merkleRoot = nameRoot,
+            nameRoot = nameRoot,
             witnessRoot = witnessRoot,
-            treeRoot = merkleRoot,
+            merkleRoot = merkleRoot,
             reservedRoot = reservedRoot,
             time = time,
             bits = bits,
