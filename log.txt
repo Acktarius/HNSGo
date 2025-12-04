@@ -1,0 +1,116 @@
+DoT server started successfully on port 853
+20:29:12.131  D  DoT server started successfully on port 1853
+20:29:12.131  D  DoH/DoT servers ready - testing DNS resolution...
+20:29:12.131  D  DohService: Testing DNS resolution (servers are ready)
+20:29:12.131  D  DohService: Sync complete! (height: 324559, network: 305302, behind: -19257)
+20:29:12.132  D  DohService: Simulating 'dig' query for 'website.conceal' via DoH... (chain height: 324559, network: 305302)
+20:29:12.132  D  DoT: Waiting for connection...
+20:29:12.136  D  DohService: Making DoH GET request to: https://127.0.0.1:8443/dns-query?dns=GdsBAAABAAAAAAAAB3dlYnNpdGUHY29uY2VhbAAAAQAB
+20:29:12.138  D  MainActivity: Received debug query result - status: Testing DNS resolution (dig simulation)..., result: null
+20:29:12.178  D  DohService: Server certificate verified successfully (signature valid)
+20:29:12.231  D  RecursiveResolver: Resolving 'website.conceal' (type: 1)
+20:29:12.236  D  SpvClient: Resolving Handshake domain: website.conceal
+20:29:12.236  D  SpvClient: Resolving domain 'website.conceal' -> TLD: 'conceal'
+20:29:12.243  D  SpvClient: Querying blockchain for TLD 'conceal' (hash: 9881230ee09e526c...)
+20:29:12.249  D  SpvClient: Resolving conceal from blockchain (hash: 9881230ee09e526ce8df5b263529207286e94a7a3fa5fecf328f3e2d869fb79e)
+20:29:12.252  D  SpvClient: Latest header height: 324559 (headerChain.size=10000), nameRoot: 5b480e105f0147d2...
+20:29:12.252  D  SpvClient: Querying P2P peers for name hash...
+20:29:12.252  D  SpvClient: Using treeRoot from height 324559 - if peers are ahead, resolution may fail until we sync more
+20:29:12.257  D  SpvP2P: queryName called for hash: 9881230ee09e526c...
+20:29:12.257  D  SpvP2P: Loading persisted peers for name query...
+20:29:12.257  D  SpvP2P: Loaded 10 persisted peers for name query
+20:29:12.259  D  Loaded error counts for 8 peers
+20:29:12.260  D  SpvP2P: Excluded 8 peers with too many errors (>3)
+20:29:12.260  D  SpvP2P: Querying name from 2 peers (randomly shuffled)
+20:29:12.260  D  SpvP2P: Querying name from 194.50.5.27:12038
+20:29:12.577  D  SpvP2P: Starting handshake for name query to 194.50.5.27:12038 (height: 324559)
+20:29:12.598  D  SpvP2P: Sending version message (version=1, services=0, host=194.50.5.27, port=12038, height=324559, payload=133 bytes)
+20:29:12.598  D  SpvP2P: Version payload (full): 01 00 00 00 00 00 00 00 00 00 00 00 68 a9 27 69 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff ff c2 32 05 1b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 06 2f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 86 d5 c7 0c 70 64 31 bc 0b 2f 68 6e 73 67 6f 3a 30 2e 31 2f cf f3 04 00 00
+20:29:12.600  D  SpvP2P: Sending message: cmd=version (code=0), size=142, first 20 bytes: d3 f2 6e 5b 00 85 00 00 00 01 00 00 00 00 00 00 00 00 00 00
+20:29:12.600  D  SpvP2P: Waiting for handshake message (attempt 1/20, elapsed: 0ms)...
+20:29:12.806  D  SpvClient: Continuing background header sync from height 324559... (iteration 2)
+20:29:12.808  D  SpvClient: Starting P2P header sync...
+20:29:12.822  D  SpvClient: Syncing from height 324559 (chain has 10000 headers, latest hash: 0000000000000010...)
+20:29:12.823  D  SpvP2P: Starting header sync from height 324559
+20:29:12.828  D  Loaded 10 verified peers from storage
+20:29:12.828  D  Verifying 10 peers...
+20:29:13.147  D  Peer verified (connectivity): 139.59.211.187:12038
+20:29:13.147  D  Peer verified (connectivity): 194.50.5.26:12038
+20:29:13.147  D  Peer verified (connectivity): 159.69.46.23:12038
+20:29:13.148  D  Peer verified (connectivity): 45.79.134.225:12038
+20:29:13.148  D  Peer verified (connectivity): 194.50.5.27:12038
+20:29:13.149  D  Peer verified (connectivity): 139.177.198.45:12038
+20:29:13.149  D  Peer verified (connectivity): 172.104.214.189:12038
+20:29:13.157  D  Peer verified (connectivity): 50.112.123.184:12038
+20:29:13.157  D  Peer verified (connectivity): 44.229.138.206:12038
+20:29:13.167  D  Peer verified (connectivity): 72.218.15.229:12038
+20:29:13.176  D  Saved 10 verified peers to storage
+20:29:13.178  D  SpvP2P: Starting peer discovery - querying DNS seeds first
+20:29:13.179  D  Starting DNS seed discovery from 2 seeds
+20:29:13.179  D  Querying DNS seed: hs-mainnet.bcoin.ninja
+20:29:13.180  D  Trying DNS server: 9.9.9.9 for hs-mainnet.bcoin.ninja
+20:29:13.243  D  SpvP2P: Received message: verack (code=1, size=0)
+20:29:13.243  D  SpvP2P: Received message: verack (payload size: 0 bytes)
+20:29:13.243  D  SpvP2P: Verack message received
+20:29:13.244  D  SpvP2P: Waiting for handshake message (attempt 2/20, elapsed: 643ms)...
+20:29:13.527  D  SpvP2P: Received message: version (code=0, size=149)
+20:29:13.528  D  SpvP2P: Received message: version (payload size: 149 bytes)
+20:29:13.528  D  SpvP2P: Version message received, parsing...
+20:29:13.528  D  SpvP2P: Peer version: 3, services: 3, height: 305303
+20:29:13.531  D  SpvP2P: Sending message: cmd=verack (code=1), size=9, first 20 bytes: d3 f2 6e 5b 01 00 00 00 00
+20:29:13.531  D  SpvP2P: Sent verack after receiving peer's version
+20:29:13.531  D  SpvP2P: Handshake successful in 931ms (version: true, verack: true)
+20:29:13.531  D  SpvP2P: Handshake successful for name query
+20:29:13.544  D  SpvP2P: Sending getproof for name hash: 9881230ee09e526c... (root: 5b480e105f0147d2...)
+20:29:13.544  D  SpvP2P: Sending getproof (root + nameHash = 64 bytes)
+20:29:13.547  D  SpvP2P: Sending message: cmd=getproof (code=26), size=73, first 20 bytes: d3 f2 6e 5b 1a 40 00 00 00 5b 48 0e 10 5f 01 47 d2 ec 3d 73
+20:29:13.547  D  SpvP2P: Waiting for proof response...
+20:29:13.847  D  DNS lookup failed for hs-mainnet.bcoin.ninja using 9.9.9.9: result=2
+20:29:13.847  D  Trying DNS server: 1.1.1.1 for hs-mainnet.bcoin.ninja
+20:29:14.043  D  SpvP2P: Received message: notfound (code=22, size=9)
+20:29:14.044  D  SpvP2P: Received message: notfound, payload size: 9
+20:29:14.044  W  SpvP2P: Received 'notfound' message (size=9)
+20:29:14.049  D  SpvP2P: notfound payload: 00 01 00 00 00 00 00 00 00
+20:29:14.049  D  SpvP2P: Domain not found in blockchain or peer doesn't have proof (valid protocol response)
+20:29:14.051  D  SpvP2P: Domain not found on 194.50.5.27:12038 (valid response, trying other peers)
+20:29:14.052  D  SpvP2P: Querying name from 139.59.211.187:12038
+20:29:14.373  D  SpvP2P: Starting handshake for name query to 139.59.211.187:12038 (height: 324559)
+20:29:14.393  D  SpvP2P: Sending version message (version=1, services=0, host=139.59.211.187, port=12038, height=324559, payload=133 bytes)
+20:29:14.393  D  SpvP2P: Version payload (full): 01 00 00 00 00 00 00 00 00 00 00 00 6a a9 27 69 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff ff 8b 3b d3 bb 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 06 2f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 34 9e a6 cc 25 23 ba 69 0b 2f 68 6e 73 67 6f 3a 30 2e 31 2f cf f3 04 00 00
+20:29:14.396  D  SpvP2P: Sending message: cmd=version (code=0), size=142, first 20 bytes: d3 f2 6e 5b 00 85 00 00 00 01 00 00 00 00 00 00 00 00 00 00
+20:29:14.397  D  SpvP2P: Waiting for handshake message (attempt 1/20, elapsed: 0ms)...
+20:29:14.892  D  SpvP2P: Received message: verack (code=1, size=0)
+20:29:14.893  D  SpvP2P: Received message: verack (payload size: 0 bytes)
+20:29:14.893  D  SpvP2P: Verack message received
+20:29:14.893  D  SpvP2P: Waiting for handshake message (attempt 2/20, elapsed: 496ms)...
+20:29:15.277  D  SpvP2P: Received message: version (code=0, size=133)
+20:29:15.277  D  SpvP2P: Received message: version (payload size: 133 bytes)
+20:29:15.278  D  SpvP2P: Version message received, parsing...
+20:29:15.278  D  SpvP2P: Peer version: 3, services: 3, height: 305303
+20:29:15.281  D  SpvP2P: Sending message: cmd=verack (code=1), size=9, first 20 bytes: d3 f2 6e 5b 01 00 00 00 00
+20:29:15.282  D  SpvP2P: Sent verack after receiving peer's version
+20:29:15.282  D  SpvP2P: Handshake successful in 885ms (version: true, verack: true)
+20:29:15.282  D  SpvP2P: Handshake successful for name query
+20:29:15.295  D  SpvP2P: Sending getproof for name hash: 9881230ee09e526c... (root: 5b480e105f0147d2...)
+20:29:15.295  D  SpvP2P: Sending getproof (root + nameHash = 64 bytes)
+20:29:15.298  D  SpvP2P: Sending message: cmd=getproof (code=26), size=73, first 20 bytes: d3 f2 6e 5b 1a 40 00 00 00 5b 48 0e 10 5f 01 47 d2 ec 3d 73
+20:29:15.298  D  SpvP2P: Waiting for proof response...
+20:29:15.659  D  SpvP2P: Received message: notfound (code=22, size=9)
+20:29:15.659  D  SpvP2P: Received message: notfound, payload size: 9
+20:29:15.659  W  SpvP2P: Received 'notfound' message (size=9)
+20:29:15.662  D  SpvP2P: notfound payload: 00 01 00 00 00 00 00 00 00
+20:29:15.662  D  SpvP2P: Domain not found in blockchain or peer doesn't have proof (valid protocol response)
+20:29:15.664  D  SpvP2P: Domain not found on 139.59.211.187:12038 (valid response, trying other peers)
+20:29:15.664  W  SpvP2P: All peers tried for name query - domain not found or all peers had errors
+20:29:15.664  D  SpvClient: Domain not found in blockchain (valid protocol response)
+20:29:15.664  D  SpvClient: Note: If we're behind peers (our height: 324559), 'notfound' may be due to outdated treeRoot
+20:29:15.664  D  SpvClient: Continue syncing headers in background to catch up to network
+20:29:15.665  W  SpvClient: [DEV] Blockchain resolution unavailable or failed, falling back to external resolver (development only)
+20:29:15.665  W  SpvClient: [DEV] In production, this fallback should be removed - SPV must be the only source
+20:29:15.667  D  SpvClient: Sending DNS query to 127.0.0.1:5341
+20:29:15.674  W  SpvClient: Port unreachable - resolver may not be running at 127.0.0.1:5341
+20:29:15.674  W  SpvClient: Make sure hnsd or another Handshake resolver is running, or configure resolver address
+20:29:15.674  D  RecursiveResolver: No blockchain records found for 'website.conceal'
+20:29:15.675  D  Forwarding to regular DNS (not found in Handshake): website.conceal.
+20:29:15.998  W  DohService: website.conceal -> NXDOMAIN
+20:29:16.004  D  MainActivity: Received debug query result - status: ✗ Domain not found, result: website.conceal -> NXDOMAIN

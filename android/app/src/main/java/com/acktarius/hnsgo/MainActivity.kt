@@ -9,7 +9,18 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -17,8 +28,26 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -27,6 +56,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import android.util.Log
 import android.widget.Toast
 
@@ -128,6 +160,45 @@ fun HnsGoScreen(act: MainActivity) {
         certInstalled = CertHelper.isCAInstalledSync(act)
         Log.d("HNSGo", "Certificate installed status: $certInstalled")
     }
+    
+    // Listen for debug query results from DohService
+    DisposableEffect(Unit) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                try {
+                    val status = intent?.getStringExtra("status") ?: ""
+                    val result = intent?.getStringExtra("result")
+                    // BroadcastReceiver callbacks run on main thread, so we can update state directly
+                    debugQueryStatus = status
+                    debugQueryResult = result
+                    Log.d("HNSGo", "MainActivity: Received debug query result - status: $status, result: $result")
+                } catch (e: Exception) {
+                    Log.e("HNSGo", "Error handling debug query result", e)
+                }
+            }
+        }
+        try {
+            // Use RECEIVER_NOT_EXPORTED since this is an internal broadcast (our service to our activity)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                act.registerReceiver(receiver, android.content.IntentFilter("com.acktarius.hnsgo.DEBUG_QUERY_RESULT"), Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                act.registerReceiver(receiver, android.content.IntentFilter("com.acktarius.hnsgo.DEBUG_QUERY_RESULT"))
+            }
+        } catch (e: Exception) {
+            Log.e("HNSGo", "Error registering broadcast receiver", e)
+        }
+        
+        // Cleanup on dispose
+        onDispose {
+            try {
+                act.unregisterReceiver(receiver)
+            } catch (e: Exception) {
+                // Receiver might not be registered or already unregistered
+                Log.d("HNSGo", "Error unregistering receiver (may already be unregistered): ${e.message}")
+            }
+        }
+    }
 
     LaunchedEffect(enabled) {
         Log.d("HNSGo", "LaunchedEffect triggered, enabled=$enabled")
@@ -142,57 +213,86 @@ fun HnsGoScreen(act: MainActivity) {
                     // Configure resolver to use external Handshake resolver
                     SpvClient.setResolver(Config.DEBUG_RESOLVER_HOST, Config.DEBUG_RESOLVER_PORT)
                     SpvClient.init(act.filesDir, act)
-                    Log.d("HNSGo", "SPV sync completed successfully")
-                    syncStatus = SyncStatus.SYNCED
-                    syncMessage = "Sync complete"
                     
-                    // Debug: Test DNS resolution for a Handshake domain
-                    debugQueryStatus = "Waiting for header sync..."
-                    // Wait a bit for sync to start, then check if we have enough headers
-                    kotlinx.coroutines.delay(2000) // Give sync 2 seconds to start
+                    // Check if we're caught up with network
+                    val networkHeight = SpvClient.getNetworkHeight()
+                    val ourHeight = SpvClient.getChainHeight()
                     
-                    // Check if we have enough headers before attempting resolution
-                    val minRequiredHeight = Config.CHECKPOINT_HEIGHT + 1000
-                    val currentHeight = SpvClient.getChainHeight()
-                    if (currentHeight < minRequiredHeight) {
-                        debugQueryStatus = "⚠ Waiting for sync (height: $currentHeight, need: $minRequiredHeight)"
-                        debugQueryResult = "Please wait for header sync to complete before resolving domains"
-                        Log.w("HNSGo", "Debug: Not enough headers synced yet (height: $currentHeight, required: $minRequiredHeight)")
-                        Log.w("HNSGo", "Debug: Skipping test resolution until sync completes")
+                    if (networkHeight != null && ourHeight < networkHeight) {
+                        val behind = networkHeight - ourHeight
+                        syncStatus = SyncStatus.SYNCING
+                        syncMessage = "Syncing... ($ourHeight / $networkHeight)"
+                        Log.d("HNSGo", "SPV sync in progress: $ourHeight / $networkHeight (behind by $behind blocks)")
                     } else {
-                        debugQueryStatus = "Testing DNS resolution..."
+                        syncStatus = SyncStatus.SYNCED
+                        syncMessage = "Sync complete"
+                        Log.d("HNSGo", "SPV sync completed successfully (height: $ourHeight)")
+                    }
+                    
+                    // Continue syncing headers in background to catch up to network
+                    // This is important because resolution may fail if we're too far behind peers
+                    scope.launch(Dispatchers.IO) {
                         try {
-                            val testDomain = "website.conceal"
-                            Log.d("HNSGo", "Debug: Resolving $testDomain... (chain height: $currentHeight)")
-                            val records = SpvClient.resolve(testDomain)
-                            if (records != null) {
-                                val aRecord = records.find { it.type == 1 } // A record
-                                if (aRecord != null) {
-                                    val ipAddress = String(aRecord.data)
-                                    debugQueryResult = "$testDomain -> $ipAddress"
-                                    debugQueryStatus = "✓ DNS resolution successful"
-                                    Log.d("HNSGo", "Debug: $testDomain resolved to $ipAddress")
-                                } else {
-                                    debugQueryResult = "$testDomain -> No A record found"
-                                    debugQueryStatus = "⚠ No A record"
-                                    Log.w("HNSGo", "Debug: $testDomain has no A record")
+                            // Start a coroutine to periodically update UI during sync
+                            val uiUpdateJob = scope.launch(Dispatchers.IO) {
+                                while (true) {
+                                    delay(5000) // Update every 5 seconds
+                                    val currentHeight = SpvClient.getChainHeight()
+                                    val currentNetworkHeight = SpvClient.getNetworkHeight()
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        if (currentNetworkHeight != null) {
+                                            val stillBehind = currentNetworkHeight - currentHeight
+                                            if (stillBehind <= 10) {
+                                                syncStatus = SyncStatus.SYNCED
+                                                syncMessage = "Sync complete"
+                                            } else {
+                                                syncStatus = SyncStatus.SYNCING
+                                                syncMessage = "Syncing... ($currentHeight / $currentNetworkHeight)"
+                                            }
+                                        } else {
+                                            syncStatus = SyncStatus.SYNCING
+                                            syncMessage = "Syncing... ($currentHeight / ?)"
+                                        }
+                                    }
                                 }
-                            } else {
-                                debugQueryResult = "$testDomain -> NXDOMAIN"
-                                debugQueryStatus = "✗ Domain not found"
-                                Log.w("HNSGo", "Debug: $testDomain not found")
+                            }
+                            
+                            // Continue syncing in background (non-blocking) - this will loop until caught up
+                            val updatedNetworkHeight = SpvClient.continueSync()
+                            val updatedOurHeight = SpvClient.getChainHeight()
+                            
+                            // Cancel UI update job
+                            uiUpdateJob.cancel()
+                            
+                            // Final UI update
+                            if (updatedNetworkHeight != null) {
+                                val stillBehind = updatedNetworkHeight - updatedOurHeight
+                                if (stillBehind <= 10) { // Within 10 blocks = caught up
+                                    withContext(Dispatchers.Main) {
+                                        syncStatus = SyncStatus.SYNCED
+                                        syncMessage = "Sync complete"
+                                    }
+                                } else {
+                                    withContext(Dispatchers.Main) {
+                                        syncStatus = SyncStatus.SYNCING
+                                        syncMessage = "Syncing... ($updatedOurHeight / $updatedNetworkHeight)"
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
-                            debugQueryResult = "Error: ${e.message}"
-                            debugQueryStatus = "✗ Query failed"
-                            Log.e("HNSGo", "Debug: Error resolving test domain", e)
+                            Log.w("HNSGo", "Background sync error (non-critical): ${e.message}")
                         }
                     }
                     
-                    // Start DoH server after sync
+                    // Start DoH server - debug query will happen in service after servers are ready
                     Log.d("HNSGo", "Starting DoH service...")
                     ContextCompat.startForegroundService(act, Intent(act, DohService::class.java))
                     showGuidance = true
+                    
+                    // Set initial debug status - will be updated by service when ready
+                    debugQueryStatus = "Waiting for DoH server..."
+                    debugQueryResult = "Service starting, will test resolution when ready"
                 } catch (e: Exception) {
                     Log.e("HNSGo", "Error during sync or service start", e)
                     syncStatus = SyncStatus.ERROR

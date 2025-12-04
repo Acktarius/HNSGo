@@ -29,8 +29,6 @@ object HeaderHash {
     fun hash(header: HeaderData): ByteArray {
         // EXACT MATCH to hsk_header_cache in header.c:370-414
         // Step 1: Generate padding (pad8 and pad32) - MUST be generated separately!
-        // hnsd calls hsk_header_padding twice: once for pad8, once for pad32
-        // They are NOT the same - pad8 is 8 bytes, pad32 is 32 bytes
         val pad8 = generatePadding(header, 8)
         val pad32 = generatePadding(header, 32)
         
@@ -38,9 +36,6 @@ object HeaderHash {
         val commitHash = generateCommitHash(header)
         
         // Step 3: Generate pre-hash structure
-        // hnsd: hsk_header_pre_encode(hdr, pre)
-        // Format: nonce(4) + time(8) + pad20(20) + prev_block(32) + name_root(32) + commit_hash(32) = 128 bytes
-        // Note: pad20 is generated separately (not from pad32!)
         val pad20 = generatePadding(header, 20)
         val pre = generatePreHash(header, pad20, commitHash)
         
@@ -51,14 +46,12 @@ object HeaderHash {
         }
         
         // Step 4: Blake2B-512(pre) -> left[64]
-        // hnsd: hsk_hash_blake512(pre, size, left)
         val left = ByteArray(64)
         val blake2b512 = Blake2bDigest(512)
         blake2b512.update(pre, 0, pre.size)
         blake2b512.doFinal(left, 0)
         
         // Step 5: SHA3-256(pre + pad8) -> right[32]
-        // hnsd: SHA3-256(pre, size) + pad8(8) -> right
         val right = ByteArray(32)
         val sha3 = SHA3Digest(256)
         sha3.update(pre, 0, pre.size)
@@ -66,7 +59,6 @@ object HeaderHash {
         sha3.doFinal(right, 0)
         
         // Step 6: Blake2B-256(left + pad32 + right) -> hash[32]
-        // hnsd: Blake2B-256(left[64] + pad32[32] + right[32]) -> hash[32]
         val hash = ByteArray(32)
         val blake2b256 = Blake2bDigest(256)
         blake2b256.update(left, 0, left.size)
@@ -74,10 +66,23 @@ object HeaderHash {
         blake2b256.update(right, 0, right.size)
         blake2b256.doFinal(hash, 0)
         
-        // Step 7: XOR hash with mask
-        // hnsd: hash[i] ^= mask[i] for i in 0..31
+        // Step 7: XOR hash with mask (hnsd line 409-410)
         for (i in hash.indices) {
             hash[i] = (hash[i].toInt() xor header.mask[i].toInt()).toByte()
+        }
+        
+        // Debug: Check if hash is suspicious
+        val hashIsZero = hash.all { it == 0.toByte() }
+        if (hashIsZero) {
+            val prevBlockHex = header.prevBlock.take(16).joinToString("") { "%02x".format(it) }
+            val nameRootHex = header.nameRoot.take(16).joinToString("") { "%02x".format(it) }
+            val maskHex = header.mask.take(16).joinToString("") { "%02x".format(it) }
+            android.util.Log.e("HNSGo", "HeaderHash:hash: ZERO HASH! prevBlock=$prevBlockHex nameRoot=$nameRootHex mask=$maskHex n=${header.nonce} t=${header.time} v=${header.version} b=${header.bits}")
+            // Also check intermediate values
+            val leftHex = left.take(16).joinToString("") { "%02x".format(it) }
+            val rightHex = right.take(16).joinToString("") { "%02x".format(it) }
+            val commitHashHex = commitHash.take(16).joinToString("") { "%02x".format(it) }
+            android.util.Log.e("HNSGo", "HeaderHash:hash: Intermediate values - left=$leftHex right=$rightHex commitHash=$commitHashHex")
         }
         
         return hash

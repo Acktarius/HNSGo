@@ -1,0 +1,362 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:Checkpoint.kt$Checkpoint$private fun parseCheckpoint(data: ByteArray): List&lt;Header&gt;</ID>
+    <ID>CyclomaticComplexMethod:DnsSeedDiscovery.kt$DnsSeedDiscovery$private suspend fun queryDnsSeed(seedDomain: String): List&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:DohService.kt$DohService$private suspend fun testDnsResolution()</ID>
+    <ID>CyclomaticComplexMethod:DohService.kt$LocalDoTServer$private fun handleClient(socket: javax.net.ssl.SSLSocket)</ID>
+    <ID>CyclomaticComplexMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun HnsGoScreen(act: MainActivity)</ID>
+    <ID>CyclomaticComplexMethod:PeerDiscovery.kt$PeerDiscovery$private fun deserializeDHTMessage(data: ByteArray, length: Int): DHTMessage?</ID>
+    <ID>CyclomaticComplexMethod:PeerDiscovery.kt$PeerDiscovery$suspend fun startDiscovery(bootstrapNodes: List&lt;String&gt;): List&lt;PeerNode&gt;</ID>
+    <ID>CyclomaticComplexMethod:ProtocolHandler.kt$ProtocolHandler$suspend fun handshake( input: InputStream, output: OutputStream, messageHandler: MessageHandler, sendVersion: (OutputStream) -&gt; Unit ): Pair&lt;Boolean, Int?&gt;</ID>
+    <ID>CyclomaticComplexMethod:SpvClient.kt$SpvClient$private fun parseMerkleProof(proof: ByteArray): List&lt;ByteArray&gt;</ID>
+    <ID>CyclomaticComplexMethod:SpvClient.kt$SpvClient$private fun parseResourceRecords(resourceRecords: List&lt;ByteArray&gt;): List&lt;com.acktarius.hnsgo.Record&gt;</ID>
+    <ID>CyclomaticComplexMethod:SpvClient.kt$SpvClient$private suspend fun syncHeaders(): Int?</ID>
+    <ID>CyclomaticComplexMethod:SpvClient.kt$SpvClient$suspend fun resolve(name: String): List&lt;com.acktarius.hnsgo.Record&gt;?</ID>
+    <ID>ForbiddenComment:PeerDiscovery.kt$PeerDiscovery$// TODO: Implement DNS seed discovery similar to Bitcoin</ID>
+    <ID>ForbiddenComment:SpvClient.kt$SpvClient$* DEVELOPMENT ONLY: Configure external Handshake resolver for testing/comparison * * This is NOT a production feature. Use only during development to: * - Compare SPV resolution results with local hnsd * - Cross-validate blockchain data * - Debug resolution issues * * Main resolution path: SPV blockchain sync + peer verification * TODO: Remove this once SPV is fully validated and tested * * @param host IP address (e.g., "127.0.0.1" for local hnsd during development) * @param port Port number (default: Config.DEBUG_RESOLVER_PORT)</ID>
+    <ID>ForbiddenComment:SpvClient.kt$SpvClient$* Resolve Handshake domain to DNS records * * Based on hnsd architecture: * - Blockchain stores resource records for TLDs only (not subdomains) * - For queries like "website.conceal", we extract TLD "conceal" and query blockchain * - Returns NS records (nameservers) and GLUE records (A/AAAA) for the TLD * - Subdomain records (like A records for "website.conceal") are on the nameservers, not blockchain * * PRIMARY PATH: Resolves domains directly from blockchain data using SPV * - Syncs with Handshake blockchain on device * - Cross-verifies with P2P peers * - Verifies Merkle proofs against blockchain headers * * DEVELOPMENT ONLY: Falls back to external resolver (e.g., local hnsd) for: * - Comparing SPV results during development * - Cross-validating blockchain data * - Debugging resolution issues * * TODO: Remove external resolver fallback once SPV is fully validated</ID>
+    <ID>ForbiddenComment:SpvClient.kt$SpvClient$// TODO: Extract TLSA data properly</ID>
+    <ID>ForbiddenComment:SpvClient.kt$SpvClient$// TODO: Remove this fallback once SPV is fully validated and tested</ID>
+    <ID>FunctionNaming:MainActivity.kt$@Composable fun ExpandableCard( title: String, expanded: Boolean, onExpand: () -&gt; Unit, onCollapse: () -&gt; Unit, content: @Composable () -&gt; Unit )</ID>
+    <ID>FunctionNaming:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun HnsGoScreen(act: MainActivity)</ID>
+    <ID>LargeClass:SpvClient.kt$SpvClient</ID>
+    <ID>LongMethod:Checkpoint.kt$Checkpoint$private fun parseCheckpoint(data: ByteArray): List&lt;Header&gt;</ID>
+    <ID>LongMethod:DnsSeedDiscovery.kt$DnsSeedDiscovery$private suspend fun queryDnsSeed(seedDomain: String): List&lt;String&gt;</ID>
+    <ID>LongMethod:DohService.kt$DohService$private suspend fun testDnsResolution()</ID>
+    <ID>LongMethod:MainActivity.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun HnsGoScreen(act: MainActivity)</ID>
+    <ID>LongMethod:PeerDiscovery.kt$PeerDiscovery$suspend fun startDiscovery(bootstrapNodes: List&lt;String&gt;): List&lt;PeerNode&gt;</ID>
+    <ID>LongMethod:ProtocolHandler.kt$ProtocolHandler$suspend fun handshake( input: InputStream, output: OutputStream, messageHandler: MessageHandler, sendVersion: (OutputStream) -&gt; Unit ): Pair&lt;Boolean, Int?&gt;</ID>
+    <ID>LongMethod:SpvClient.kt$SpvClient$private fun parseMerkleProof(proof: ByteArray): List&lt;ByteArray&gt;</ID>
+    <ID>LongMethod:SpvClient.kt$SpvClient$private fun parseResourceRecords(resourceRecords: List&lt;ByteArray&gt;): List&lt;com.acktarius.hnsgo.Record&gt;</ID>
+    <ID>LongMethod:SpvClient.kt$SpvClient$private fun validateHeader(header: Header): Boolean</ID>
+    <ID>LongMethod:SpvClient.kt$SpvClient$private suspend fun syncHeaders(): Int?</ID>
+    <ID>LongMethod:SpvClient.kt$SpvClient$suspend fun resolve(name: String): List&lt;com.acktarius.hnsgo.Record&gt;?</ID>
+    <ID>LongParameterList:ConnectionManager.kt$ConnectionManager$( host: String, port: Int, nameHash: ByteArray, nameRoot: ByteArray, chainHeight: Int, messageHandler: MessageHandler, protocolHandler: ProtocolHandler )</ID>
+    <ID>LongParameterList:ConnectionManager.kt$ConnectionManager$( host: String, port: Int, startHeight: Int, latestHeaderHash: ByteArray?, onHeaderReceived: (Header) -&gt; Boolean, messageHandler: MessageHandler, protocolHandler: ProtocolHandler )</ID>
+    <ID>LoopWithTooManyJumpStatements:Checkpoint.kt$Checkpoint$for</ID>
+    <ID>LoopWithTooManyJumpStatements:ConnectionManager.kt$ConnectionManager$while</ID>
+    <ID>LoopWithTooManyJumpStatements:DohService.kt$LocalDoTServer$while</ID>
+    <ID>LoopWithTooManyJumpStatements:ProtocolHandler.kt$ProtocolHandler$while</ID>
+    <ID>LoopWithTooManyJumpStatements:SpvClient.kt$SpvClient$for</ID>
+    <ID>LoopWithTooManyJumpStatements:SpvClient.kt$SpvClient$while</ID>
+    <ID>LoopWithTooManyJumpStatements:SpvP2P.kt$SpvP2P$for</ID>
+    <ID>MagicNumber:CacheManager.kt$CacheManager$1000L</ID>
+    <ID>MagicNumber:CertHelper.kt$CertHelper$64</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$0xFF</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$12</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$150</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$16</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$236</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$24</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$3</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$3000</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$32</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$4</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$44</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$5000</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$64</ID>
+    <ID>MagicNumber:Checkpoint.kt$Checkpoint$8</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$10000</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$10000L</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$1000L</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$15000L</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$30000</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$30000L</ID>
+    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$5</ID>
+    <ID>MagicNumber:DnsSeedDiscovery.kt$DnsSeedDiscovery$5</ID>
+    <ID>MagicNumber:DnsSeedDiscovery.kt$DnsSeedDiscovery$65535</ID>
+    <ID>MagicNumber:DohService.kt$LocalDoTServer$5</ID>
+    <ID>MagicNumber:HardcodedPeers.kt$HardcodedPeers$3000</ID>
+    <ID>MagicNumber:HardcodedPeers.kt$HardcodedPeers$65535</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$20</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$24</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$256</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$32</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$4</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$512</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$64</ID>
+    <ID>MagicNumber:HeaderHash.kt$HeaderHash$8</ID>
+    <ID>MagicNumber:MainActivity.kt$0.8f</ID>
+    <ID>MagicNumber:MainActivity.kt$0.95f</ID>
+    <ID>MagicNumber:MainActivity.kt$0.9f</ID>
+    <ID>MagicNumber:MainActivity.kt$10</ID>
+    <ID>MagicNumber:MainActivity.kt$5000</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$0xFC</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$0xFE</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$0xFF</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$0xFFFF</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$16</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$20</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$236</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$24</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$32</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$4</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$5</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$64</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$8</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$88</ID>
+    <ID>MagicNumber:MessageHandler.kt$MessageHandler$9</ID>
+    <ID>MagicNumber:P2PModels.kt$Header$200</ID>
+    <ID>MagicNumber:P2PModels.kt$Header$32</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$0xFC</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$0xFE</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$0xFF</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$0xFFFF</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$10</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$1000</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$16</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$18</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$32</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$4</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$6</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$7</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$8</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery$8192</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery.DHTMessageType.ANNOUNCE_PEER$6</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery.DHTMessageType.GET_PEERS$4</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery.DHTMessageType.NODES$3</ID>
+    <ID>MagicNumber:PeerDiscovery.kt$PeerDiscovery.DHTMessageType.PEERS$5</ID>
+    <ID>MagicNumber:PeerStorage.kt$PeerStorage$50</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$0xFE</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$0xFFFF</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$4</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$8</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$10</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$1000</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$10000L</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$11</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$12</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$16</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$20</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$2000</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$255</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$32</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$33</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$36</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$4</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$500</ID>
+    <ID>MagicNumber:ProtocolHandler.kt$ProtocolHandler$64</ID>
+    <ID>MagicNumber:RecursiveResolver.kt$RecursiveResolver$28</ID>
+    <ID>MagicNumber:RecursiveResolver.kt$RecursiveResolver$3600</ID>
+    <ID>MagicNumber:RecursiveResolver.kt$RecursiveResolver$4096</ID>
+    <ID>MagicNumber:ResourceRecord.kt$ResourceRecord$16</ID>
+    <ID>MagicNumber:ResourceRecord.kt$ResourceRecord$28</ID>
+    <ID>MagicNumber:ResourceRecord.kt$ResourceRecord$4</ID>
+    <ID>MagicNumber:ResourceRecord.kt$ResourceRecord$43</ID>
+    <ID>MagicNumber:ResourceRecord.kt$ResourceRecord$5</ID>
+    <ID>MagicNumber:ResourceRecord.kt$ResourceRecord$6</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$0x10000</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$0xFC</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$0xFE</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$0xFF</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$0xFFFF</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$10</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$100</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$1000</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$12</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$150</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$16</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$200</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$24</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$256</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$32</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$4</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$5</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$5000</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$52</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$64</ID>
+    <ID>MagicNumber:SpvClient.kt$SpvClient$8</ID>
+    <ID>MagicNumber:SyncWorker.kt$SyncWorker.Companion$12</ID>
+    <ID>MaxLineLength:Checkpoint.kt$Checkpoint$// reserved_root(32) + witness_root(32) + merkle_root(32) + version(4) + bits(4) + mask(32) = 236 bytes</ID>
+    <ID>MaxLineLength:Checkpoint.kt$Checkpoint$Log.i("HNSGo", " 1. Download: https://raw.githubusercontent.com/handshake-org/hnsd/master/src/checkpoints.h")</ID>
+    <ID>MaxLineLength:Checkpoint.kt$Checkpoint$Log.w("HNSGo", "Checkpoint: Data too small! Got ${data.size} bytes, expected at least $expectedSize bytes")</ID>
+    <ID>MaxLineLength:Checkpoint.kt$Checkpoint$suspend</ID>
+    <ID>MaxLineLength:ConnectionManager.kt$ConnectionManager$Log.d("HNSGo", "ConnectionManager: Hardcoded list is empty, populating with first 10 DNS-discovered peers")</ID>
+    <ID>MaxLineLength:DnsSeedDiscovery.kt$DnsSeedDiscovery$Log.d("DnsSeedDiscovery", "DNS lookup failed for $seedDomain using ${dnsServer ?: "system"}: result=${aLookup.result}")</ID>
+    <ID>MaxLineLength:DnsSeedDiscovery.kt$DnsSeedDiscovery$Log.d("DnsSeedDiscovery", "Error querying DNS server ${dnsServer ?: "system"} for $seedDomain: ${e.message}")</ID>
+    <ID>MaxLineLength:DnsSeedDiscovery.kt$DnsSeedDiscovery$Log.d("DnsSeedDiscovery", "Found ${aRecords.size} A records for $seedDomain using ${dnsServer ?: "system"}")</ID>
+    <ID>MaxLineLength:DnsSeedDiscovery.kt$DnsSeedDiscovery$Log.w("DnsSeedDiscovery", "NOTE: $seedDomain may not be a DNS seed server, or may need to be queried differently")</ID>
+    <ID>MaxLineLength:DnsSeedDiscovery.kt$DnsSeedDiscovery$Log.w("DnsSeedDiscovery", "No peers found from $seedDomain (A: ${aRecords.size}, AAAA: ${aaaaRecords.size}, TXT: ${txtRecords.size})")</ID>
+    <ID>MaxLineLength:DohService.kt$DohService$Log.d("HNSGo", "DohService: Simulating 'dig' query for '$testDomain' via DoH... (chain height: $currentHeight, network: $networkHeight)")</ID>
+    <ID>MaxLineLength:DohService.kt$DohService$Log.d("HNSGo", "DohService: Sync complete! (height: $currentHeight, network: $networkHeight, behind: $behind)")</ID>
+    <ID>MaxLineLength:DohService.kt$DohService$Log.d("HNSGo", "DohService: Waiting for sync... (height: $currentHeight, network: $networkHeight, behind: $behind blocks)")</ID>
+    <ID>MaxLineLength:DohService.kt$DohService$Log.w("HNSGo", "DohService: Not enough headers synced yet (height: $currentHeight, required: $minRequiredHeight)")</ID>
+    <ID>MaxLineLength:DohService.kt$DohService.&lt;no name provided&gt;$throw java.security.cert.CertificateException("Server certificate issuer ($serverIssuer) does not match CA subject ($caSubject)")</ID>
+    <ID>MaxLineLength:DohService.kt$LocalDoHServer$NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())</ID>
+    <ID>MaxLineLength:DohService.kt$LocalDoHServer$return NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())</ID>
+    <ID>MaxLineLength:DohService.kt$LocalDoTServer$val sslServerSocket = factory.createServerSocket(port, SERVER_SOCKET_BACKLOG, bindAddress) as SSLServerSocket</ID>
+    <ID>MaxLineLength:MainActivity.kt$" • Chrome: Settings → Privacy and security → Security → Use secure DNS → With your current service provider"</ID>
+    <ID>MaxLineLength:MainActivity.kt$"Note: DANE (DNS-Based Authentication of Named Entities) configuration is not available in Firefox for Android. This feature is primarily for desktop browsers."</ID>
+    <ID>MaxLineLength:MainActivity.kt$"Note: Private DNS (DoT) requires port 853 and won't work with localhost. Configure your browser/app to use DoH endpoint:"</ID>
+    <ID>MaxLineLength:MainActivity.kt$"• Chrome: Settings → Privacy and security → Security → Advanced → Use secure DNS → Custom → Paste URL"</ID>
+    <ID>MaxLineLength:MainActivity.kt$act.registerReceiver(receiver, android.content.IntentFilter("com.acktarius.hnsgo.DEBUG_QUERY_RESULT"), Context.RECEIVER_NOT_EXPORTED)</ID>
+    <ID>MaxLineLength:MainActivity.kt$val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")</ID>
+    <ID>MaxLineLength:MessageHandler.kt$MessageHandler$Log.d("HNSGo", "MessageHandler: Proof message key: ${key.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:MessageHandler.kt$MessageHandler$Log.d("HNSGo", "MessageHandler: Proof message root: ${root.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:MessageHandler.kt$MessageHandler$Log.d("HNSGo", "MessageHandler: Sending message: cmd=$command (code=$cmdCode), size=${message.size}, first 20 bytes: $debugBytes")</ID>
+    <ID>MaxLineLength:MessageHandler.kt$MessageHandler$Log.w("HNSGo", "MessageHandler: Invalid magic: 0x${magic.toString(16)} (expected: 0x${MAGIC_MAINNET.toString(16)})")</ID>
+    <ID>MaxLineLength:PeerDiscovery.kt$PeerDiscovery$Log.d("PeerDiscovery", "Bootstrap node ${bootstrap.address} did not respond to DHT query (may not support DHT or is unreachable)")</ID>
+    <ID>MaxLineLength:PeerDiscovery.kt$PeerDiscovery$Log.d("PeerDiscovery", "Discovered peer via DHT: ${neighbor.address.hostString}:${neighbor.address.port}")</ID>
+    <ID>MaxLineLength:PeerDiscovery.kt$PeerDiscovery$Log.d("PeerDiscovery", "Discovered peer via iterative lookup: ${peer.address.hostString}:${peer.address.port}")</ID>
+    <ID>MaxLineLength:PeerDiscovery.kt$PeerDiscovery$Log.d("PeerDiscovery", "Peer discovery complete: found ${discoveredPeers.size} peers (${bootstrapPeers.size} bootstrap + ${discoveredPeers.size - bootstrapPeers.size} discovered)")</ID>
+    <ID>MaxLineLength:PeerDiscovery.kt$PeerDiscovery$private suspend</ID>
+    <ID>MaxLineLength:ProtocolHandler.kt$ProtocolHandler$Log.d("HNSGo", "ProtocolHandler: Peer version: ${versionData.version}, height: ${versionData.height}")</ID>
+    <ID>MaxLineLength:ProtocolHandler.kt$ProtocolHandler$Log.d("HNSGo", "ProtocolHandler: Sending version (version=$version, height=$chainHeight, payload=${payload.size} bytes)")</ID>
+    <ID>MaxLineLength:ProtocolHandler.kt$ProtocolHandler$Log.d("HNSGo", "ProtocolHandler: Waiting for handshake message (attempt ${attempts + 1}/$maxAttempts)...")</ID>
+    <ID>MaxLineLength:RecursiveResolver.kt$RecursiveResolver$response.addRecord(AAAARecord(nsName, DClass.IN, 3600, InetAddress.getByName(ip)), Section.ADDITIONAL)</ID>
+    <ID>MaxLineLength:RecursiveResolver.kt$RecursiveResolver$val glueAAAARecords: List&lt;com.acktarius.hnsgo.Record&gt; = blockchainRecords.filter { it.type == 28 } // AAAA records (GLUE)</ID>
+    <ID>MaxLineLength:RecursiveResolver.kt$RecursiveResolver$val glueARecords: List&lt;com.acktarius.hnsgo.Record&gt; = blockchainRecords.filter { it.type == 1 } // A records (GLUE)</ID>
+    <ID>MaxLineLength:ResourceRecord.kt$ResourceRecord$Log.d("HNSGo", "ResourceRecord: Converted ${blockchainRecords.size} Handshake records to ${dnsRecords.size} DNS records")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - bits: ${checkpointLastHeader.bits} (0x%08x)".format(checkpointLastHeader.bits))</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - extraNonce: ${checkpointLastHeader.extraNonce.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - extraNonce: ${lastHeader.extraNonce} (0x%016x)".format(lastHeader.extraNonce))</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - mask: ${checkpointLastHeader.mask.take(8).joinToString(" ") { "%02x".format(it) }}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - merkleRoot (for hash): ${checkpointLastHeader.treeRoot.take(8).joinToString(" ") { "%02x".format(it) }}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - merkleRoot (for hash): ${lastHeader.treeRoot.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - nameRoot (for hash): ${checkpointLastHeader.merkleRoot.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - nameRoot (for hash): ${lastHeader.merkleRoot.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - nonce: ${checkpointLastHeader.nonce} (0x%08x)".format(checkpointLastHeader.nonce))</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - prevBlock: ${checkpointLastHeader.prevBlock.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - prevBlock: ${lastHeader.prevBlock.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - reservedRoot: ${checkpointLastHeader.reservedRoot.take(8).joinToString(" ") { "%02x".format(it) }}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - reservedRoot: ${lastHeader.reservedRoot.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - time: ${checkpointLastHeader.time} (0x%016x)".format(checkpointLastHeader.time))</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - version: ${checkpointLastHeader.version} (0x%08x)".format(checkpointLastHeader.version))</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - version: ${lastHeader.version} (0x%08x)".format(lastHeader.version))</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - witnessRoot: ${checkpointLastHeader.witnessRoot.take(8).joinToString(" ") { "%02x".format(it) }}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", " - witnessRoot: ${lastHeader.witnessRoot.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: After proof node $index: ${currentHash.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Calculated: ${calculatedRoot.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Caught up with network! (height: $chainHeight, network: $networkHeight)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Continue syncing headers in background to catch up to network")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Continuing background header sync from height $chainHeight... (iteration $iteration)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Debug hash matches checkpointLastHeader.hash(): ${debugCheckpointHash.contentEquals(checkpointLastHash)}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Expected: ${treeRoot.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: First post-checkpoint header matches checkpoint - chain is valid")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Hash matches lastHeader.hash(): ${debugHash.contentEquals(lastHash)}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Latest header height: $chainHeight (headerChain.size=${headerChain.size}), nameRoot: ${latestHeader.merkleRoot.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Leaf hash: ${currentHash.joinToString("") { "%02x".format(it) }.take(16)}...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Network height: ${syncResult.networkHeight}, our height: $chainHeight (behind by $behind blocks)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: New header (height $chainHeight) prevBlock: ${header.prevBlock.joinToString(" ") { "%02x".format(it) }}")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Next header will be first post-checkpoint header - will validate against checkpoint")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: No network height after $iteration attempts, stopping background sync")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: No network height available, checking if sync should continue...")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Note: If we're behind peers (our height: $chainHeight), 'notfound' may be due to outdated treeRoot")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: P2P query success (${resourceRecords.size} records, proof: ${proof != null})")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Parsed ${records.size} records from ${resourceRecords.size} resource records")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Querying blockchain for TLD '$tld' (hash: ${tldHash.joinToString("") { "%02x".format(it) }.take(16)}...)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Resolving $name from blockchain (hash: ${nameHash.joinToString("") { "%02x".format(it) }})")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Saved $heightSnapshot headers to disk (chain height: $heightSnapshot)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Successfully resolved $name from blockchain: ${records.size} records")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Successfully resolved TLD '$tld' from blockchain: ${blockchainRecords.size} records")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Syncing from checkpoint range (height $startHeight, checkpoint ends at $checkpointEndHeight)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Syncing from height $startHeight (chain has ${headerChain.size} headers, latest hash: ${latestHeaderHash?.take(8)?.joinToString("") { "%02x".format(it) } ?: "none"}...)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Trimmed $removeCount old headers from memory (now keeping heights $firstInMemoryHeight to $chainHeight)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.d("HNSGo", "SpvClient: Using treeRoot from height $chainHeight - if peers are ahead, resolution may fail until we sync more")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.e("HNSGo", "SpvClient: CRITICAL - First post-checkpoint header doesn't match checkpoint!")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.i("HNSGo", "SpvClient: App can still work with external Handshake resolver (configure via setResolver)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Connection refused - resolver at $resolverHost:$resolverPort not available")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: DNS query timeout - resolver at $resolverHost:$resolverPort not responding")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Invalid record length: $length (remaining: ${buffer.remaining()})")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Make sure hnsd or another Handshake resolver is running, or configure resolver address")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Not enough headers synced (height: $chainHeight, required: $minRequiredHeight)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Port unreachable - resolver may not be running at $resolverHost:$resolverPort")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Received prevBlock has $leadingZeros leading zeros - this may be correct for this block")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: Skipping blockchain resolution - not enough headers synced yet (height: $chainHeight)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: [DEV] Blockchain resolution unavailable or failed, falling back to external resolver (development only)")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$android.util.Log.w("HNSGo", "SpvClient: [DEV] In production, this fallback should be removed - SPV must be the only source")</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$private</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$private suspend</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$val dnsRecords: List&lt;com.acktarius.hnsgo.Record&gt; = ResourceRecord.convertHandshakeRecordsToDNS(blockchainRecords)</ID>
+    <ID>MaxLineLength:SpvClient.kt$SpvClient$val query = org.xbill.DNS.Message.newQuery(DNSRecord.newRecord(Name.fromString("$name."), Type.A, DClass.IN))</ID>
+    <ID>MayBeConst:SpvClient.kt$SpvClient$// Header chain storage // Only keep recent headers in memory to avoid OOM (last MAX_IN_MEMORY_HEADERS) // Older headers are stored on disk and loaded on-demand when needed private val MAX_IN_MEMORY_HEADERS = 5000 // Keep last 5000 headers in memory</ID>
+    <ID>NestedBlockDepth:CertHelper.kt$CertHelper$fun saveCertToDownloads(context: Context): Boolean</ID>
+    <ID>NestedBlockDepth:Checkpoint.kt$Checkpoint$private fun parseCheckpoint(data: ByteArray): List&lt;Header&gt;</ID>
+    <ID>NestedBlockDepth:DohService.kt$LocalDoTServer$private fun handleClient(socket: javax.net.ssl.SSLSocket)</ID>
+    <ID>NestedBlockDepth:PeerDiscovery.kt$PeerDiscovery$private fun deserializeDHTMessage(data: ByteArray, length: Int): DHTMessage?</ID>
+    <ID>NestedBlockDepth:ProtocolHandler.kt$ProtocolHandler$suspend fun handshake( input: InputStream, output: OutputStream, messageHandler: MessageHandler, sendVersion: (OutputStream) -&gt; Unit ): Pair&lt;Boolean, Int?&gt;</ID>
+    <ID>NestedBlockDepth:SpvClient.kt$SpvClient$private fun parseMerkleProof(proof: ByteArray): List&lt;ByteArray&gt;</ID>
+    <ID>NestedBlockDepth:SpvClient.kt$SpvClient$private fun parseRecords(proof: ByteArray): List&lt;com.acktarius.hnsgo.Record&gt;</ID>
+    <ID>NestedBlockDepth:SpvClient.kt$SpvClient$private fun parseResourceRecords(resourceRecords: List&lt;ByteArray&gt;): List&lt;com.acktarius.hnsgo.Record&gt;</ID>
+    <ID>NestedBlockDepth:SpvClient.kt$SpvClient$private fun reconstructMerkleRoot(nameHash: ByteArray, records: List&lt;com.acktarius.hnsgo.Record&gt;, proofNodes: List&lt;ByteArray&gt;): ByteArray?</ID>
+    <ID>NestedBlockDepth:SpvClient.kt$SpvClient$private fun validateHeader(header: Header): Boolean</ID>
+    <ID>PackageNaming:ConnectionManager.kt$package com.acktarius.hnsgo.SpvP2P</ID>
+    <ID>PackageNaming:MessageHandler.kt$package com.acktarius.hnsgo.SpvP2P</ID>
+    <ID>PackageNaming:ProtocolHandler.kt$package com.acktarius.hnsgo.SpvP2P</ID>
+    <ID>ReturnCount:CacheManager.kt$CacheManager$fun get(name: String, type: Int): ByteArray?</ID>
+    <ID>ReturnCount:CertHelper.kt$CertHelper$fun saveCertToDownloads(context: Context): Boolean</ID>
+    <ID>ReturnCount:DohService.kt$LocalDoHServer$override fun serve(session: IHTTPSession): Response</ID>
+    <ID>ReturnCount:DohService.kt$LocalDoTServer$private fun processDnsQuery(query: org.xbill.DNS.Message): org.xbill.DNS.Message</ID>
+    <ID>ReturnCount:MessageHandler.kt$MessageHandler$fun parseProofMessage(payload: ByteArray): Pair&lt;List&lt;ByteArray&gt;, ByteArray?&gt;</ID>
+    <ID>ReturnCount:PeerDiscovery.kt$PeerDiscovery$private fun deserializeDHTMessage(data: ByteArray, length: Int): DHTMessage?</ID>
+    <ID>ReturnCount:ProtocolHandler.kt$ProtocolHandler$suspend fun handshake( input: InputStream, output: OutputStream, messageHandler: MessageHandler, sendVersion: (OutputStream) -&gt; Unit ): Pair&lt;Boolean, Int?&gt;</ID>
+    <ID>ReturnCount:SpvClient.kt$SpvClient$private fun parseMerkleProof(proof: ByteArray): List&lt;ByteArray&gt;</ID>
+    <ID>ReturnCount:SpvClient.kt$SpvClient$private fun reconstructMerkleRoot(nameHash: ByteArray, records: List&lt;com.acktarius.hnsgo.Record&gt;, proofNodes: List&lt;ByteArray&gt;): ByteArray?</ID>
+    <ID>ReturnCount:SpvClient.kt$SpvClient$private fun validateHeader(header: Header): Boolean</ID>
+    <ID>ReturnCount:SpvClient.kt$SpvClient$private fun verifyDomainProof(nameHash: ByteArray, records: List&lt;com.acktarius.hnsgo.Record&gt;, proof: ByteArray?, treeRoot: ByteArray): Boolean</ID>
+    <ID>SwallowedException:CertHelper.kt$CertHelper$e: Exception</ID>
+    <ID>SwallowedException:Checkpoint.kt$Checkpoint$e: java.io.FileNotFoundException</ID>
+    <ID>SwallowedException:Checkpoint.kt$Checkpoint$e: java.net.ConnectException</ID>
+    <ID>SwallowedException:Checkpoint.kt$Checkpoint$e: java.net.SocketTimeoutException</ID>
+    <ID>SwallowedException:ConnectionManager.kt$ConnectionManager$e: TimeoutCancellationException</ID>
+    <ID>SwallowedException:ConnectionManager.kt$ConnectionManager$e: UnknownHostException</ID>
+    <ID>SwallowedException:DnsSeedDiscovery.kt$DnsSeedDiscovery$e: Exception</ID>
+    <ID>SwallowedException:DohService.kt$DohService$e: Exception</ID>
+    <ID>SwallowedException:DohService.kt$DohService.&lt;no name provided&gt;$e: Exception</ID>
+    <ID>SwallowedException:DohService.kt$LocalDoHServer$e: Exception</ID>
+    <ID>SwallowedException:DohService.kt$LocalDoTServer$e: java.io.EOFException</ID>
+    <ID>SwallowedException:HardcodedPeers.kt$HardcodedPeers$e: Exception</ID>
+    <ID>SwallowedException:HardcodedPeers.kt$HardcodedPeers$e: java.net.ConnectException</ID>
+    <ID>SwallowedException:HardcodedPeers.kt$HardcodedPeers$e: java.net.SocketTimeoutException</ID>
+    <ID>SwallowedException:PeerDiscovery.kt$PeerDiscovery$e: Exception</ID>
+    <ID>SwallowedException:PeerDiscovery.kt$PeerDiscovery$e: SocketTimeoutException</ID>
+    <ID>SwallowedException:ProtocolHandler.kt$ProtocolHandler$e: Exception</ID>
+    <ID>SwallowedException:ProtocolHandler.kt$ProtocolHandler$e: SocketTimeoutException</ID>
+    <ID>SwallowedException:RecursiveResolver.kt$RecursiveResolver$e: SocketTimeoutException</ID>
+    <ID>SwallowedException:SpvClient.kt$SpvClient$e: Exception</ID>
+    <ID>SwallowedException:SpvClient.kt$SpvClient$e: java.net.ConnectException</ID>
+    <ID>SwallowedException:SpvClient.kt$SpvClient$e: java.net.PortUnreachableException</ID>
+    <ID>SwallowedException:SpvClient.kt$SpvClient$e: java.net.SocketTimeoutException</ID>
+    <ID>SwallowedException:SyncWorker.kt$SyncWorker$e: Exception</ID>
+    <ID>ThrowsCount:CertHelper.kt$CertHelper$fun installCert(context: Context)</ID>
+    <ID>TooGenericExceptionCaught:CertHelper.kt$CertHelper$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:Checkpoint.kt$Checkpoint$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ConnectionManager.kt$ConnectionManager$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DnsSeedDiscovery.kt$DnsSeedDiscovery$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DohService.kt$DohService$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DohService.kt$DohService.&lt;no name provided&gt;$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DohService.kt$LocalDoHServer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DohService.kt$LocalDoTServer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:HardcodedPeers.kt$HardcodedPeers$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MainActivity.kt$&lt;no name provided&gt;$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MainActivity.kt$e2: Exception</ID>
+    <ID>TooGenericExceptionCaught:MainActivity.kt$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MessageHandler.kt$MessageHandler$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PeerDiscovery.kt$PeerDiscovery$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PeerErrorTracker.kt$PeerErrorTracker$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PeerStorage.kt$PeerStorage$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ProtocolHandler.kt$ProtocolHandler$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RecursiveResolver.kt$RecursiveResolver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SpvClient.kt$SpvClient$e2: Exception</ID>
+    <ID>TooGenericExceptionCaught:SpvClient.kt$SpvClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SpvP2P.kt$SpvP2P$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SyncWorker.kt$SyncWorker$e: Exception</ID>
+    <ID>TooManyFunctions:CertHelper.kt$CertHelper</ID>
+    <ID>TooManyFunctions:MessageHandler.kt$MessageHandler</ID>
+    <ID>TooManyFunctions:PeerDiscovery.kt$PeerDiscovery</ID>
+    <ID>TooManyFunctions:SpvClient.kt$SpvClient</ID>
+    <ID>UnusedParameter:ProtocolHandler.kt$ProtocolHandler$sendVersion: (OutputStream) -&gt; Unit</ID>
+    <ID>UnusedPrivateMember:CertHelper.kt$CertHelper$private fun getCertificateFingerprint(cert: X509Certificate): String</ID>
+    <ID>UnusedPrivateMember:ProtocolHandler.kt$private fun ByteArrayOutputStream.writeBytes(bytes: ByteArray)</ID>
+    <ID>UnusedPrivateMember:ProtocolHandler.kt$private fun ByteArrayOutputStream.writeInt64(value: Long)</ID>
+    <ID>UnusedPrivateMember:ProtocolHandler.kt$private fun ByteArrayOutputStream.writeVarInt(value: Int)</ID>
+    <ID>UnusedPrivateMember:SpvClient.kt$SpvClient$private suspend fun getHeaderAtHeight(height: Int): Header?</ID>
+    <ID>UseCheckOrError:CertHelper.kt$CertHelper$throw IllegalStateException("CA certificate must be self-signed")</ID>
+    <ID>UseCheckOrError:CertHelper.kt$CertHelper$throw IllegalStateException("Certificate installer not available")</ID>
+    <ID>UseCheckOrError:CertHelper.kt$CertHelper$throw IllegalStateException("Certificate is missing required CA extensions")</ID>
+    <ID>UseCheckOrError:CertHelper.kt$CertHelper$throw IllegalStateException("Failed to encode certificate")</ID>
+    <ID>UseCheckOrError:HeaderHash.kt$HeaderHash$throw IllegalStateException("Pre-hash size mismatch: expected $preSize, got ${pre.size}")</ID>
+  </CurrentIssues>
+</SmellBaseline>

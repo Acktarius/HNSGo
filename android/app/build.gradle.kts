@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -46,4 +47,32 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
     implementation("com.upokecenter:cbor:4.5.1")
+}
+
+detekt {
+    buildUponDefaultConfig = true // preconfigure defaults
+    allRules = false // activate all available (even unstable) rules
+    config.setFrom("${project.rootDir}/detekt.yml")
+    baseline = file("${project.projectDir}/detekt-baseline.xml") // Ignore existing issues
+    
+    parallel = true // parallel compilation of files
+    
+    reports {
+        html {
+            required.set(true)
+            outputLocation.set(file("${layout.buildDirectory.get()}/reports/detekt/detekt.html"))
+        }
+        xml {
+            required.set(false)
+            outputLocation.set(file("${layout.buildDirectory.get()}/reports/detekt/detekt.xml"))
+        }
+        txt {
+            required.set(false)
+            outputLocation.set(file("${layout.buildDirectory.get()}/reports/detekt/detekt.txt"))
+        }
+        sarif {
+            required.set(true) // SARIF format for GitHub integration
+            outputLocation.set(file("${layout.buildDirectory.get()}/reports/detekt/detekt.sarif"))
+        }
+    }
 }

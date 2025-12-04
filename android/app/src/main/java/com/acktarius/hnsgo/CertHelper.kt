@@ -23,12 +23,15 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import java.math.BigInteger
-import java.security.*
+import java.security.KeyPairGenerator
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.SecureRandom
 import java.security.cert.X509Certificate
-import java.util.*
+import java.util.Date
 
 object CertHelper {
-    private const val CA_ALIAS = "hns_go_ca"
     private const val SERVER_ALIAS = "localhost" // Matches server cert CN
     // Complete X.500 name with all required fields for Android recognition
     private const val CA_NAME = "CN=HNS Go CA, O=HNS Go, OU=Certificate Authority, L=Internet, ST=Global, C=US"
@@ -40,6 +43,33 @@ object CertHelper {
     // This ensures the same CA is always generated
     private val FIXED_SEED = "HNSGo-Cert-Seed-2025".toByteArray()
     
+    // Certificate generation constants
+    private const val RSA_KEY_SIZE = 2048
+    private const val CERT_SERIAL_BITS = 64
+    private const val MILLIS_PER_SECOND = 1000L
+    private const val SECONDS_PER_MINUTE = 60
+    private const val MINUTES_PER_HOUR = 60
+    private const val HOURS_PER_DAY = 24
+    private const val DAYS_PER_YEAR = 365
+    private const val MILLIS_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MILLIS_PER_SECOND
+    private const val MILLIS_PER_YEAR = DAYS_PER_YEAR * MILLIS_PER_DAY
+    private const val CERT_VALIDITY_DAYS_BEFORE = 1
+    private const val CA_CERT_VALIDITY_YEARS = 10
+    private const val SERVER_CERT_VALIDITY_YEARS = 1
+    
+    // Cache CA certificate and key to ensure consistency across all calls
+    @Volatile
+    private var cachedCA: Pair<X509Certificate, PrivateKey>? = null
+    
+    /**
+     * Get or generate the CA certificate and key (cached for consistency)
+     */
+    private fun getOrGenerateCA(): Pair<X509Certificate, PrivateKey> {
+        return cachedCA ?: synchronized(this) {
+            cachedCA ?: generateCA().also { cachedCA = it }
+        }
+    }
+    
     /**
      * Generate CA certificate and key pair
      * Returns: Pair of (CA Certificate, CA Private Key)
@@ -50,17 +80,17 @@ object CertHelper {
         }
         
         val keyPair = KeyPairGenerator.getInstance("RSA").apply {
-            initialize(2048, random)
+            initialize(RSA_KEY_SIZE, random)
         }.generateKeyPair()
         
         val subject = X500Name(CA_NAME)
         val now = System.currentTimeMillis()
-        val notBefore = Date(now - 86400000L) // 1 day ago
-        val notAfter = Date(now + 365L * 24 * 60 * 60 * 1000L * 10) // 10 years
+        val notBefore = Date(now - CERT_VALIDITY_DAYS_BEFORE * MILLIS_PER_DAY)
+        val notAfter = Date(now + CA_CERT_VALIDITY_YEARS * MILLIS_PER_YEAR)
         
         val builder = JcaX509v3CertificateBuilder(
             subject,
-            BigInteger(64, random),
+            BigInteger(CERT_SERIAL_BITS, random),
             notBefore,
             notAfter,
             subject,
@@ -123,18 +153,18 @@ object CertHelper {
         }
         
         val keyPair = KeyPairGenerator.getInstance("RSA").apply {
-            initialize(2048, random)
+            initialize(RSA_KEY_SIZE, random)
         }.generateKeyPair()
         
         val issuer = X500Name(caCert.subjectX500Principal.name)
         val subject = X500Name(SERVER_NAME)
         val now = System.currentTimeMillis()
-        val notBefore = Date(now - 86400000L)
-        val notAfter = Date(now + 365L * 24 * 60 * 60 * 1000L) // 1 year
+        val notBefore = Date(now - CERT_VALIDITY_DAYS_BEFORE * MILLIS_PER_DAY)
+        val notAfter = Date(now + SERVER_CERT_VALIDITY_YEARS * MILLIS_PER_YEAR)
         
         val builder = JcaX509v3CertificateBuilder(
             issuer,
-            BigInteger(64, random),
+            BigInteger(CERT_SERIAL_BITS, random),
             notBefore,
             notAfter,
             subject,
@@ -171,8 +201,8 @@ object CertHelper {
      * This maintains compatibility with DohService.createSSLContext()
      */
     fun generateKeyStore(password: CharArray = "changeit".toCharArray()): KeyStore {
-        // Generate CA with its key
-        val (caCert, caKey) = generateCA()
+        // Get or generate CA with its key (cached for consistency)
+        val (caCert, caKey) = getOrGenerateCA()
         // Generate server cert signed by CA
         val (serverCert, serverKey) = generateServerCert(caCert, caKey)
         
@@ -199,7 +229,7 @@ object CertHelper {
      */
     fun installCert(context: Context) {
         try {
-            val (caCert, _) = generateCA()
+            val (caCert, _) = getOrGenerateCA()
             
             // Validate certificate before installation
             // Ensure it's a proper CA certificate
@@ -251,7 +281,7 @@ object CertHelper {
      * Get CA certificate as DER-encoded bytes (for installation)
      */
     private fun getCADerBytes(): ByteArray {
-        val (caCert, _) = generateCA()
+        val (caCert, _) = getOrGenerateCA()
         // Return DER-encoded bytes (not PEM)
         return caCert.encoded
     }
@@ -323,8 +353,16 @@ object CertHelper {
     /**
      * Get CA certificate as PEM string (for export/debugging)
      */
+    /**
+     * Get the CA certificate (for SSL trust configuration)
+     */
+    fun getCACertificate(): X509Certificate {
+        val (caCert, _) = getOrGenerateCA()
+        return caCert
+    }
+    
     fun getCAPem(): String {
-        val (caCert, _) = generateCA()
+        val (caCert, _) = getOrGenerateCA()
         val encoded = caCert.encoded
         val base64 = java.util.Base64.getEncoder().encodeToString(encoded)
         return "-----BEGIN CERTIFICATE-----\n" +

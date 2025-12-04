@@ -1,10 +1,16 @@
 package com.acktarius.hnsgo
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import android.util.Log
-import org.xbill.DNS.*
+import org.xbill.DNS.AAAARecord
+import org.xbill.DNS.ARecord
+import org.xbill.DNS.Lookup
+import org.xbill.DNS.SimpleResolver
+import org.xbill.DNS.TXTRecord
+import org.xbill.DNS.Type
 
 /**
  * DNS seed discovery for Handshake peer discovery

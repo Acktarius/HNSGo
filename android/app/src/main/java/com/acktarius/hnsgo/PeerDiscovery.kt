@@ -1,8 +1,24 @@
 package com.acktarius.hnsgo
 
-import kotlinx.coroutines.*
-import java.io.*
-import java.net.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.ByteArrayOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
@@ -31,7 +47,6 @@ class PeerDiscovery {
         // Kademlia constants
         private const val K_BUCKET_SIZE = 20 // Number of nodes per bucket
         private const val ALPHA = 3 // Concurrency parameter for lookups
-        private const val KEY_SIZE = 32 // SHA256 hash size (256 bits)
         private const val BUCKET_COUNT = 256 // Number of buckets (one per bit)
         
         // Timeouts
@@ -706,7 +721,7 @@ class PeerDiscovery {
      */
     private fun parseSeedNode(seed: String): Pair<String, Int> {
         val parts = seed.split("@")
-        if (parts.size != 2) throw IllegalArgumentException("Invalid seed format: $seed")
+        require(parts.size == 2) { "Invalid seed format: $seed" }
         
         val address = parts[1]
         val hostPort = address.split(":")

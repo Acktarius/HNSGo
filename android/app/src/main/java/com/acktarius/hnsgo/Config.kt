@@ -13,11 +13,16 @@ object Config {
     const val DOH_PORT = 8443  // HTTPS DoH server port
     const val DOT_PORT = 1853  // DoT server port (above 1024, no root required)
     
-    // SPV Configuration (from hnsd constants.h)
+    // SPV Configuration (from hnsd constants.h and store.h)
     const val HEADER_SYNC_BATCH_SIZE = 100  // Save headers every N headers
     const val HEADER_SYNC_TIMEOUT_SECONDS = 30
+    // Matching hnsd: saves checkpoint every HSK_STORE_CHECKPOINT_WINDOW (2000) blocks (chain.c:750)
+    // But we save more frequently for Android (app may close) - every 2000 blocks for checkpoint-style saves
+    const val HEADER_SAVE_FREQUENCY_THRESHOLD = 2000  // Save every N new headers (matching HSK_STORE_CHECKPOINT_WINDOW)
+    const val HEADER_SAVE_CHAIN_INTERVAL = 2000  // Save every N headers in chain (matching HSK_STORE_CHECKPOINT_WINDOW)
     const val CHECKPOINT_HEIGHT = 136000  // Mainnet checkpoint height (from checkpoints.h)
-    const val CHECKPOINT_WINDOW = 2000  // HSK_STORE_CHECKPOINT_WINDOW from constants.h
+    const val CHECKPOINT_WINDOW = 2000  // HSK_STORE_CHECKPOINT_WINDOW from constants.h (exact match)
+    const val CHECKPOINT_HEADERS_COUNT = 150  // HSK_STORE_HEADERS_COUNT from store.h (exact match)
     const val TREE_INTERVAL = 36  // HSK_TREE_INTERVAL from constants.h
     
     // Protocol Constants (from hnsd constants.h)
@@ -52,6 +57,10 @@ object Config {
     const val P2P_SOCKET_TIMEOUT_MS = 30000  // Socket read timeout (30 seconds)
     const val P2P_MAX_RETRIES = 3  // Max retries per seed node
     const val P2P_RETRY_BASE_DELAY_MS = 1000L  // Base delay for exponential backoff (1 second)
+    
+    // Parallel Peer Connection Configuration (Rolling Cadence)
+    const val RESERVED_THREADS = 4  // Reserve threads for other work (hash computation, I/O, etc.)
+    const val MAX_PARALLEL_PEER_CONNECTIONS = 3  // Max parallel peer connections for header fetching pipeline
     
     // DHT (Kademlia) Configuration
     const val DHT_PORT = 12038  // UDP port for DHT (same as P2P TCP port)
