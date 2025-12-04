@@ -467,7 +467,10 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         if (questions.isEmpty()) return bad()
         val q = questions[0]
         val nameStr = q.name.toString(true)
-        val name = (nameStr as String).lowercase(Locale.getDefault())
+        // CRITICAL: Handshake TLDs can contain symbols and mixed case!
+        // We MUST NOT normalize - preserve the exact name as received
+        // DNS queries are case-insensitive, but Handshake name hashing is case-sensitive
+        val name = nameStr as String
         val type = q.type
 
         // Try Handshake recursive resolution first

@@ -37,6 +37,8 @@ object Config {
     const val MAGIC_MAINNET = 0x5b6ef2d3.toInt()  // HSK_MAGIC (mainnet)
     const val P2P_PORT = 12038  // HSK_PORT (mainnet TCP P2P)
     const val BRONTIDE_PORT = 44806  // HSK_BRONTIDE_PORT (encrypted P2P, optional)
+    const val NS_PORT = 5349  // HSK_NS_PORT (hnsd Name Server UDP DNS port)
+    const val RS_PORT = 5350  // HSK_RS_PORT (hnsd Recursive Server UDP DNS port)
     const val BITS = 0x1c00ffff  // HSK_BITS (difficulty target)
     
     // Target/Retarget Constants (from hnsd constants.h)
@@ -78,8 +80,9 @@ object Config {
     // DNS Seeds (Primary method for peer discovery)
     // Source: https://github.com/handshake-org/hsd/blob/master/lib/protocol/networks.js
     val DNS_SEEDS = listOf(
-        "hs-mainnet.bcoin.ninja",  // Christopher Jeffrey
-        "seed.htools.work"          // Rithvik Vibhu
+        "seed.htools.work"          // Rithvik Vibhu (working DNS seed)
+        // Note: seed.easyhandshake.com is mentioned in hnsd seeds.h but is not a DNS seed server
+        // It was used to discover hardcoded IPs, which are now in HardcodedPeers.kt
     )
     
     // Hardcoded Peers Configuration

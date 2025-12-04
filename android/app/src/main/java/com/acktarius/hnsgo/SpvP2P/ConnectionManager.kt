@@ -119,9 +119,16 @@ internal object ConnectionManager {
         for (attempt in 1..maxRetries) {
             try {
                 val socket = Socket()
-                socket.connect(InetSocketAddress(host, port), 10000)
-                socket.soTimeout = 30000
-                Log.d("HNSGo", "ConnectionManager: Connected to $host:$port on attempt $attempt")
+                // Configure socket for P2P (matching hnsd/libuv best practices)
+                // TCP_NODELAY: Disable Nagle's algorithm for low-latency P2P communication
+                socket.tcpNoDelay = true
+                // Keep-alive: Detect dead connections faster (important for long-lived P2P connections)
+                socket.keepAlive = true
+                // Connect timeout: 10 seconds (from Config.P2P_CONNECT_TIMEOUT_MS)
+                socket.connect(InetSocketAddress(host, port), Config.P2P_CONNECT_TIMEOUT_MS)
+                // Socket read timeout: 30 seconds (from Config.P2P_SOCKET_TIMEOUT_MS)
+                socket.soTimeout = Config.P2P_SOCKET_TIMEOUT_MS
+                Log.d("HNSGo", "ConnectionManager: Connected to $host:$port on attempt $attempt (TCP_NODELAY=true, keepAlive=true)")
                 return@withContext socket
             } catch (e: ConnectException) {
                 lastException = e
@@ -288,8 +295,9 @@ internal object ConnectionManager {
         host: String,
         port: Int,
         nameHash: ByteArray,
-        nameRoot: ByteArray,
+        nameRoot: ByteArray, // Fallback root if headerChain not available
         chainHeight: Int,
+        headerChain: List<Header>?, // Optional: if provided, calculate root based on peer height
         messageHandler: MessageHandler,
         protocolHandler: ProtocolHandler
     ): NameQueryResult = withContext(Dispatchers.IO) {
@@ -313,9 +321,51 @@ internal object ConnectionManager {
             
             Log.d("HNSGo", "ConnectionManager: Handshake successful with $host:$port (peer height: $peerHeight)")
             
-            val nameHashHex = nameHash.take(16).joinToString("") { "%02x".format(it) }
-            Log.d("HNSGo", "ConnectionManager: Sending getproof for name hash: $nameHashHex... (nameRoot from height: $chainHeight)")
-            protocolHandler.sendGetProof(output, nameHash, nameRoot, messageHandler)
+            // CRITICAL: Adjust root based on peer height to ensure peer has it
+            // Calculate the peer's safe root (same logic as hnsd's hsk_chain_safe_root)
+            // Use the peer's height to calculate their safe root, ensuring they have it
+            val adjustedRoot = if (headerChain != null && headerChain.isNotEmpty() && peerHeight != null) {
+                // Calculate safe root based on peer's height (matching hnsd chain.c:180-209)
+                val interval = Config.TREE_INTERVAL
+                val firstHeaderHeight = chainHeight - headerChain.size + 1
+                // Use peer's height to calculate their safe root
+                var mod = peerHeight % interval
+                if (mod >= 12) mod = 0
+                val peerSafeHeight = peerHeight - mod
+                // Ensure we have this header in our chain
+                val safeHeight = if (peerSafeHeight >= firstHeaderHeight && peerSafeHeight <= chainHeight) {
+                    peerSafeHeight
+                } else {
+                    // If peer's safe height is beyond our chain, use the closest we have
+                    minOf(peerSafeHeight, chainHeight)
+                }
+                
+                // Get root from header at safeHeight
+                if (safeHeight >= firstHeaderHeight && safeHeight <= chainHeight) {
+                    val index = safeHeight - firstHeaderHeight
+                    if (index >= 0 && index < headerChain.size) {
+                        val adjustedRootBytes = headerChain[index].nameRoot
+                        val adjustedRootHex = adjustedRootBytes.joinToString("") { "%02x".format(it) }
+                        Log.d("HNSGo", "ConnectionManager: Adjusted root based on peer height $peerHeight -> using root from height $safeHeight: $adjustedRootHex")
+                        adjustedRootBytes
+                    } else {
+                        Log.w("HNSGo", "ConnectionManager: Index out of bounds for adjusted root, using fallback root")
+                        nameRoot
+                    }
+                } else {
+                    Log.w("HNSGo", "ConnectionManager: Safe height $safeHeight outside range, using fallback root")
+                    nameRoot
+                }
+            } else {
+                // No header chain or peer height, use fallback root
+                Log.d("HNSGo", "ConnectionManager: No header chain or peer height, using fallback root")
+                nameRoot
+            }
+            
+            val nameHashHex = nameHash.joinToString("") { "%02x".format(it) }
+            val adjustedRootHex = adjustedRoot.joinToString("") { "%02x".format(it) }
+            Log.d("HNSGo", "ConnectionManager: Sending getproof for name hash: $nameHashHex (adjustedRoot: $adjustedRootHex, peer height: $peerHeight, our height: $chainHeight)")
+            protocolHandler.sendGetProof(output, nameHash, adjustedRoot, messageHandler)
             
             var proofMessage: P2PMessage? = null
             var attempts = 0
@@ -336,7 +386,10 @@ internal object ConnectionManager {
                         break
                     }
                     "notfound" -> {
-                        Log.d("HNSGo", "ConnectionManager: Domain not found (valid protocol response)")
+                        // Log full notfound response for debugging
+                        val payloadHex = message.payload.joinToString("") { "%02x".format(it) }
+                        val payloadSize = message.payload.size
+                        Log.d("HNSGo", "ConnectionManager: Domain not found (valid protocol response) - payload size: $payloadSize, payload: $payloadHex")
                         return@withContext NameQueryResult.NotFound
                     }
                     "ping" -> {

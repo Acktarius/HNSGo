@@ -83,6 +83,21 @@ internal object MessageHandler {
         val debugBytes = message.take(20).joinToString(" ") { "%02x".format(it) }
         Log.d("HNSGo", "MessageHandler: Sending message: cmd=$command (code=$cmdCode), size=${message.size}, first 20 bytes: $debugBytes")
         
+        // For getproof messages, log the complete wire format for byte-for-byte comparison
+        if (command == "getproof") {
+            val messageHex = message.joinToString("") { "%02x".format(it) }
+            Log.w("HNSGo", "MessageHandler: ========== GETPROOF COMPLETE MESSAGE ==========")
+            Log.w("HNSGo", "MessageHandler: Total message size: ${message.size} bytes")
+            Log.w("HNSGo", "MessageHandler: Message bytes (hex): $messageHex")
+            val magicBytes = message.slice(0..3).joinToString("") { "%02x".format(it) }
+            val expectedMagic = "d3f26e5b"  // 0x5b6ef2d3 in little-endian: d3 f2 6e 5b
+            Log.w("HNSGo", "MessageHandler: Magic (bytes 0-3): $magicBytes (expected: $expectedMagic, match: ${magicBytes == expectedMagic})")
+            Log.w("HNSGo", "MessageHandler: Command (byte 4): ${"%02x".format(message[4].toInt() and 0xFF)} (expected: 1a for GETPROOF)")
+            Log.w("HNSGo", "MessageHandler: Payload size (bytes 5-8): ${message.slice(5..8).joinToString("") { "%02x".format(it) }} (expected: 40000000 = 64 in little-endian)")
+            Log.w("HNSGo", "MessageHandler: Payload (bytes 9-72): ${message.slice(9 until message.size).joinToString("") { "%02x".format(it) }}")
+            Log.w("HNSGo", "MessageHandler: ==============================================")
+        }
+        
         output.write(message)
         output.flush()
     }

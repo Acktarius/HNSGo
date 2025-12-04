@@ -1,8 +1,9 @@
 package com.acktarius.hnsgo.spvp2p
 
+import android.util.Log
 import com.acktarius.hnsgo.Config
 import com.acktarius.hnsgo.HardcodedPeers
-import android.util.Log
+import com.acktarius.hnsgo.Header
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -30,8 +31,13 @@ internal object NameQuery {
         nameHash: ByteArray,
         nameRoot: ByteArray,
         chainHeight: Int,
-        discoverPeers: suspend () -> List<String>
+        headerChain: List<Header>?, // Optional: if provided, adjust root based on peer height
+        discoverPeers: suspend () -> List<String>,
+        maxPeers: Int = Int.MAX_VALUE
     ): NameQueryResult = withContext(Dispatchers.IO) {
+        // Note: nameRoot should be from a height that peers have
+        // We pass chainHeight for version message, but the actual root used
+        // should be calculated to ensure peers have it
         // For name queries, use persisted peers directly (fast) instead of full discovery (slow)
         val peersToTry = try {
             HardcodedPeers.getFallbackPeers()
@@ -45,26 +51,40 @@ internal object NameQuery {
             return@withContext NameQueryResult.Error
         }
         
-        Log.d("HNSGo", "NameQuery: Trying ${peersToTry.size} peers for name query")
+        // Limit peers if maxPeers is specified
+        val peersToTryLimited = if (maxPeers < Int.MAX_VALUE) {
+            peersToTry.take(maxPeers).also {
+                Log.d("HNSGo", "NameQuery: Limited to ${it.size} peers (from ${peersToTry.size} total, maxPeers=$maxPeers)")
+            }
+        } else {
+            peersToTry.also {
+                Log.d("HNSGo", "NameQuery: Trying all ${it.size} peers for name query")
+            }
+        }
         
         // Try each peer until we get a response
         // Some peers may not support name queries (getproof) - they might only support header sync
         // Also, some peers may have pruned data, so we try multiple peers even if one says "notfound"
         var lastError: String? = null
         var notFoundCount = 0
-        val maxNotFoundBeforeGivingUp = 3  // Try at least 3 peers before concluding domain doesn't exist
+        val maxNotFoundBeforeGivingUp = if (maxPeers < Int.MAX_VALUE) {
+            // When limiting peers, use a smaller threshold (e.g., 3 out of 5)
+            minOf(3, peersToTryLimited.size)
+        } else {
+            10  // Try at least 10 peers before concluding domain doesn't exist
+        }
         
-        for ((index, peer) in peersToTry.withIndex()) {
+        for ((index, peer) in peersToTryLimited.withIndex()) {
             val parts = peer.split(":")
             if (parts.size != 2) continue
             
             val host = parts[0]
             val port = parts[1].toIntOrNull() ?: Config.P2P_PORT
             
-            Log.d("HNSGo", "NameQuery: Trying peer ${index + 1}/${peersToTry.size}: $host:$port")
+            Log.d("HNSGo", "NameQuery: Trying peer ${index + 1}/${peersToTryLimited.size}: $host:$port")
             
             val result = ConnectionManager.queryNameFromPeer(
-                host, port, nameHash, nameRoot, chainHeight,
+                host, port, nameHash, nameRoot, chainHeight, headerChain,
                 MessageHandler, ProtocolHandler
             )
             
@@ -93,12 +113,19 @@ internal object NameQuery {
             }
         }
         
-        Log.w("HNSGo", "NameQuery: Failed to query name from all ${peersToTry.size} peers")
+        Log.w("HNSGo", "NameQuery: Failed to query name from all ${peersToTryLimited.size} peers")
+        
+        // If we got "notfound" from multiple peers, that's a valid response (domain doesn't exist)
+        // Return NotFound instead of Error in this case
+        if (notFoundCount > 0) {
+            Log.d("HNSGo", "NameQuery: Got $notFoundCount 'notfound' responses - returning NotFound")
+            return@withContext NameQueryResult.NotFound
+        }
+        
         if (lastError != null) {
             Log.w("HNSGo", "NameQuery: Last error was: $lastError")
         }
-        // If we got "notfound" from at least one peer, that's a valid response (domain doesn't exist)
-        // But if all peers errored, that's a real problem
+        // If all peers errored (no notfound responses), that's a real problem
         return@withContext NameQueryResult.Error
     }
 }

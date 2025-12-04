@@ -68,9 +68,11 @@ object SpvP2P {
     suspend fun queryName(
         nameHash: ByteArray,
         nameRoot: ByteArray,
-        chainHeight: Int = 0
+        chainHeight: Int = 0,
+        headerChain: List<Header>? = null, // Optional: if provided, adjust root based on peer height
+        maxPeers: Int = Int.MAX_VALUE
     ): NameQueryResult = withContext(Dispatchers.IO) {
-        val result = NameQuery.queryName(nameHash, nameRoot, chainHeight) { discoverPeers() }
+        val result = NameQuery.queryName(nameHash, nameRoot, chainHeight, headerChain, { discoverPeers() }, maxPeers)
         
         // Convert internal NameQueryResult to public SpvP2P.NameQueryResult
         when (result) {

@@ -27,21 +27,35 @@ import java.net.InetAddress
  */
 object ResourceRecord {
     /**
-     * Extract TLD from domain name
+     * Extract TLD from domain name and lowercase it (EXACT MATCH to hnsd req.c:96-103)
      * For "website.conceal" -> "conceal"
      * For "conceal" -> "conceal"
      * 
+     * hnsd req.c:96: hsk_dns_label_get(qs->name, -1, req->tld);
+     * hnsd req.c:103: hsk_to_lower(req->tld);
+     * hnsd utils.c:222-232: hsk_to_lower only lowercases A-Z, preserves symbols!
+     * 
      * @param name Domain name (may include subdomain)
-     * @return Top-level domain (TLD)
+     * @return Top-level domain (TLD) - extracted and lowercased (letters only, symbols preserved)
      */
     fun extractTLD(name: String): String {
-        val normalized = name.lowercase().trimEnd('.')
-        val parts = normalized.split('.')
-        return if (parts.size > 1) {
+        // Extract last label (TLD) - matching hnsd req.c:96
+        val trimmed = name.trimEnd('.')
+        val parts = trimmed.split('.')
+        val tld = if (parts.size > 1) {
             parts.last() // Return last part (TLD)
         } else {
-            normalized // Already a TLD
+            trimmed // Already a TLD
         }
+        
+        // Lowercase ONLY letters (A-Z -> a-z), preserve symbols - matching hnsd utils.c:222-232
+        return tld.map { char ->
+            if (char in 'A'..'Z') {
+                char + 32 // Lowercase: 'A' (65) -> 'a' (97), difference is 32
+            } else {
+                char // Preserve symbols, numbers, and already lowercase letters
+            }
+        }.joinToString("")
     }
     
     /**

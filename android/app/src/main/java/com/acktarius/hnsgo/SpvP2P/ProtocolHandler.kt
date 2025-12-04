@@ -219,13 +219,25 @@ internal object ProtocolHandler {
     ) {
         require(nameHash.size == 32) { "Name hash must be 32 bytes, got ${nameHash.size}" }
         require(nameRoot.size == 32) { "Tree root must be 32 bytes, got ${nameRoot.size}" }
+        
+        // EXACT MATCH to hnsd msg.c:289-293 (hsk_getproof_msg_write)
+        // hnsd writes: root[32] then key[32] (matching struct order)
         val payload = ByteArray(64).apply {
-            System.arraycopy(nameRoot, 0, this, 0, 32)
-            System.arraycopy(nameHash, 0, this, 32, 32)
+            System.arraycopy(nameRoot, 0, this, 0, 32)  // root first (offset 0-31)
+            System.arraycopy(nameHash, 0, this, 32, 32)  // key second (offset 32-63)
         }
-        val nameRootHex = nameRoot.take(16).joinToString("") { "%02x".format(it) }
-        val nameHashHex = nameHash.take(16).joinToString("") { "%02x".format(it) }
-        Log.d("HNSGo", "ProtocolHandler: Sending getproof (nameRoot: $nameRootHex..., nameHash: $nameHashHex...)")
+        
+        // Detailed byte-for-byte logging for debugging
+        val nameRootHex = nameRoot.joinToString("") { "%02x".format(it) }
+        val nameHashHex = nameHash.joinToString("") { "%02x".format(it) }
+        val payloadHex = payload.joinToString("") { "%02x".format(it) }
+        Log.w("HNSGo", "ProtocolHandler: ========== GETPROOF WIRE FORMAT ==========")
+        Log.w("HNSGo", "ProtocolHandler: Payload size: ${payload.size} bytes (expected: 64)")
+        Log.w("HNSGo", "ProtocolHandler: Payload bytes (hex): $payloadHex")
+        Log.w("HNSGo", "ProtocolHandler: First 32 bytes (root): $nameRootHex")
+        Log.w("HNSGo", "ProtocolHandler: Last 32 bytes (key/nameHash): $nameHashHex")
+        Log.w("HNSGo", "ProtocolHandler: ===========================================")
+        
         messageHandler.sendMessage(output, "getproof", payload)
     }
     
@@ -381,7 +393,9 @@ internal object ProtocolHandler {
                 break
             } else if (message.command == "notfound") {
                 // Peer doesn't have the requested headers - stop waiting and try next peer
-                Log.w("HNSGo", "ProtocolHandler: Peer responded with 'notfound' - doesn't have requested headers, stopping")
+                val payloadHex = message.payload.joinToString("") { "%02x".format(it) }
+                val payloadSize = message.payload.size
+                Log.w("HNSGo", "ProtocolHandler: Peer responded with 'notfound' - doesn't have requested headers, stopping - payload size: $payloadSize, payload: $payloadHex")
                 break
             } else {
                 // Handle other messages (addr, etc.) but continue waiting for headers
