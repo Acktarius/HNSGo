@@ -423,8 +423,8 @@ object CertHelper {
     }
     
     /**
-     * Open Settings to install certificate manually (Android 11+)
-     * Tries multiple approaches to open certificate installation page
+     * Open Settings to install certificate manually
+     * Tries multiple approaches to open certificate installation page directly
      */
     fun openCertificateInstallSettings(context: Context) {
         // Prioritize opening the certificate installation settings page directly

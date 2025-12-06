@@ -467,74 +467,57 @@ fun HnsGoScreen(act: MainActivity) {
                     
                     Spacer(Modifier.height(16.dp))
                     
+                    // Step 1: Install CA Certificate
+                    Text(
+                        "Step 1: Install CA Certificate",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
                     if (!certInstalled) {
                         Text(
-                            "1. Install CA Certificate (Required for Private DNS)",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 14.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Text(
-                            "Android 11+ requires manual certificate installation through Settings.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 12.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            "Note: Certificate only needs to be installed once and persists until removed.",
+                            "The CA certificate must be installed in Android's trust store for Firefox to trust the DoH server.",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = typewriterFont,
                                 fontSize = 11.sp
                             ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            "⚠️ Important: Private DNS won't work",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 10.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                         )
                         
                         Spacer(Modifier.height(8.dp))
                         
-                        // Step 1 with inline button
+                        // Step 1.1: Save certificate
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(0.9f)
                         ) {
                             Text(
-                                "1. Tap ",
+                                "1.1 Tap ",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                             )
                             Button(
                                 onClick = {
                                     try {
                                         val success = CertHelper.saveCertToDownloads(act)
                                         if (success) {
+                                            Toast.makeText(act, "Certificate saved to Downloads", Toast.LENGTH_SHORT).show()
                                             Log.d("HNSGo", "Certificate saved to Downloads")
                                         } else {
+                                            Toast.makeText(act, "Failed to save certificate", Toast.LENGTH_SHORT).show()
                                             Log.e("HNSGo", "Failed to save certificate")
                                         }
                                     } catch (e: Exception) {
+                                        Toast.makeText(act, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                                         Log.e("HNSGo", "Error saving certificate", e)
                                     }
                                 },
@@ -549,109 +532,149 @@ fun HnsGoScreen(act: MainActivity) {
                                 )
                             }
                             Text(
-                                " to store in downloads",
+                                " to Downloads",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                             )
                         }
                         
-                        // Step 2 with inline button
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Spacer(Modifier.height(8.dp))
+                        
+                        Text(
+                            "1.2 Tap the button below to open certificate installation settings",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 11.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Button(
+                            onClick = {
+                                try {
+                                    CertHelper.openCertificateInstallSettings(act)
+                                } catch (e: Exception) {
+                                    Log.e("HNSGo", "Error opening settings", e)
+                                    Toast.makeText(act, "Error opening settings", Toast.LENGTH_SHORT).show()
+                                    try {
+                                        act.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                    } catch (e2: Exception) {
+                                        Log.e("HNSGo", "Error opening fallback settings", e2)
+                                    }
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth(0.9f)
                         ) {
                             Text(
-                                "2. Install the certificate in your ",
+                                "Open Certificate Settings",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                            )
-                            Button(
-                                onClick = {
-                                    try {
-                                        // Open certificate installation settings directly
-                                        CertHelper.openCertificateInstallSettings(act)
-                                    } catch (e: Exception) {
-                                        Log.e("HNSGo", "Error opening settings", e)
-                                        // Fallback to general settings if specific intent fails
-                                        try {
-                                            act.startActivity(Intent(Settings.ACTION_SETTINGS))
-                                        } catch (e2: Exception) {
-                                            Log.e("HNSGo", "Error opening fallback settings", e2)
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .height(32.dp)
-                                    .padding(horizontal = 6.dp)
-                            ) {
-                                Text(
-                                    "Settings",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = typewriterFont,
-                                        fontSize = 11.sp
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false
                                 )
-                            }
+                            )
                         }
                         
-                        Text(
-                            "3. Select VPN or WiFi and install the certificate 'hns-go-ca.crt' from Downloads",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                        )
+                        Spacer(Modifier.height(8.dp))
                         
                         Text(
-                            "4. Enter name 'HNS Go CA' and tap 'OK'",
+                            "1.3 Tap 'Install from storage' → Select 'hns-go-ca.crt' from Downloads",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = typewriterFont,
                                 fontSize = 11.sp
                             ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Text(
+                            "1.4 When prompted, select 'CA certificate' (NOT 'VPN & app user certificate' or 'Wi-Fi')",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 11.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Text(
+                            "⚠️ Important: You must select 'CA certificate' for Firefox to trust the DoH server",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 10.sp
+                            ),
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Text(
+                            "1.5 Enter name 'HNS Go CA' → Tap OK",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 11.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                         )
                         
                         Spacer(Modifier.height(8.dp))
                         
-                        // Button to mark certificate as installed
-                        Button(
-                            onClick = {
-                                CertHelper.markCertAsInstalled(act)
-                                certInstalled = true
-                                Log.d("HNSGo", "User marked certificate as installed")
-                            },
-                            modifier = Modifier.fillMaxWidth(0.8f)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(0.9f)
                         ) {
-                            Text(
-                                "I've installed the certificate",
-                                fontFamily = typewriterFont
-                            )
+                            Button(
+                                onClick = {
+                                    CertHelper.markCertAsInstalled(act)
+                                    certInstalled = true
+                                    Toast.makeText(act, "Marked as installed", Toast.LENGTH_SHORT).show()
+                                    Log.d("HNSGo", "User marked certificate as installed")
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    "I've Installed It",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = typewriterFont,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            }
                         }
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Text(
+                            "⚠️ Certificate must be installed before Firefox can use DoH",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 10.sp
+                            ),
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                        )
                     } else {
                         Text(
                             "✓ CA Certificate is installed",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = typewriterFont,
-                                fontSize = 14.sp
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
                             ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                     
                     Spacer(Modifier.height(16.dp))
                     
-                    // Firefox third-party CA instructions (critical for Firefox users)
+                    // Step 2: Enable Third-Party CA in Firefox
                     Text(
-                        "4. Enable Third-Party CA in Firefox (Required for Firefox)",
+                        "Step 2: Enable Third-Party CA in Firefox (Required)",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = typewriterFont,
                             fontSize = 14.sp,
@@ -663,7 +686,7 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        "Firefox requires an additional step to trust user-installed CA certificates:",
+                        "Firefox requires an additional setting to trust user-installed CA certificates:",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
                             fontSize = 11.sp
@@ -674,25 +697,7 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(4.dp))
                     
                     Text(
-                        "1. Open Firefox → Settings → About Firefox",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "2. Tap the Firefox logo 7 times to enable Secret Settings",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "3. Go back to Settings → Enable 'Use third party CA certificates'",
+                        "2.1 Open Firefox → Settings → About Firefox",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
                             fontSize = 11.sp
@@ -703,7 +708,29 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(4.dp))
                     
                     Text(
-                        "⚠️ Without this step, Firefox will not trust the local DoH server certificate.",
+                        "2.2 Tap the Firefox logo 7 times to enable Secret Settings",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "2.3 Go back to Settings → Enable 'Use third party CA certificates'",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "⚠️ Without this step, Firefox will reject the DoH server certificate",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
                             fontSize = 10.sp
@@ -713,75 +740,152 @@ fun HnsGoScreen(act: MainActivity) {
                     
                     Spacer(Modifier.height(16.dp))
                     
+                    // Step 3: Configure Firefox DoH
                     Text(
-                        "5. Configure DNS (DoH recommended)",
+                        "Step 3: Configure Firefox DoH",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = typewriterFont,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         ),
                         color = MaterialTheme.colorScheme.onBackground
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        "3.1 Open Firefox → Settings → Network Settings",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                     )
                     
                     Spacer(Modifier.height(4.dp))
                     
                     Text(
-                        "Note: Private DNS (DoT) requires port 853 and won't work with localhost. Configure your browser/app to use DoH endpoint:",
+                        "3.2 Enable 'DNS over HTTPS' → Select 'Custom'",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
-                            fontSize = 10.sp
+                            fontSize = 11.sp
                         ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "3.3 Paste the DoH URL below:",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                     )
                     
                     Spacer(Modifier.height(8.dp))
                     
                     // DoH URL with copy button
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth(0.95f)
-                            .padding(vertical = 4.dp)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(0.95f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
                     ) {
-                        Text(
-                            "https://127.0.0.1:${Config.DOH_PORT}/dns-query",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .weight(1f)
-                                .clickable {
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                "https://127.0.0.1:${Config.DOH_PORT}/dns-query",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                                        Log.d("HNSGo", "DoH URL copied to clipboard")
+                                    }
+                            )
+                            IconButton(
+                                onClick = {
                                     val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                                     clipboard.setPrimaryClip(clip)
                                     Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
                                     Log.d("HNSGo", "DoH URL copied to clipboard")
-                                }
-                        )
-                        IconButton(
-                            onClick = {
-                                val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                Log.d("HNSGo", "DoH URL copied to clipboard")
-                            },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.ContentCopy,
-                                contentDescription = "Copy DoH URL",
-                                tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                                modifier = Modifier.size(18.dp)
-                            )
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "Copy DoH URL",
+                                    tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                     
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        "Browser Configuration:",
+                        "3.4 Save settings and restart Firefox",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        "⚠️ IMPORTANT: Verify Firefox is using DoH",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "If you don't see 'DoH: Connection from' logs when browsing Handshake sites, Firefox may be using system DNS instead of DoH.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 10.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        "To verify: Open Firefox → about:networking#dns → Check if queries show your DoH URL",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 10.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
+                    // Other browsers
+                    Text(
+                        "Other Browsers:",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
                             fontSize = 11.sp,
@@ -793,16 +897,7 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(4.dp))
                     
                     Text(
-                        "• Firefox: Settings → Network Settings → Enable DNS over HTTPS → Custom → Paste URL above",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 10.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "• Chrome: Settings → Privacy and security → Security → Advanced → Use secure DNS → Custom → Paste URL",
+                        "• Chrome: Settings → Privacy and security → Security → Advanced → Use secure DNS → Custom → Paste URL above",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = typewriterFont,
                             fontSize = 10.sp

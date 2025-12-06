@@ -345,6 +345,9 @@ class DohService : Service() {
             val client = okhttp3.OkHttpClient.Builder()
                 .sslSocketFactory(sslContext.socketFactory, trustManager)
                 .hostnameVerifier { _, _ -> true } // Trust localhost (we control both ends)
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
             
             val request = okhttp3.Request.Builder()
@@ -456,6 +459,9 @@ class DohService : Service() {
 
 class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
     private val fallbackResolver = SimpleResolver("9.9.9.9") // Quad9 DNS (privacy-focused, blocks malware)
+    private companion object {
+        private const val SERVER_ALIAS = "localhost"
+    }
     
     init {
         // Enable HTTPS using our CA certificate
@@ -475,6 +481,41 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
         kmf.init(keyStore, "changeit".toCharArray())
         
+        // Log certificate info for debugging
+        try {
+            val certChain = keyStore.getCertificateChain(SERVER_ALIAS)
+            if (certChain != null && certChain.isNotEmpty()) {
+                Log.d("HNSGo", "DoH: Server certificate chain has ${certChain.size} certificates")
+                val serverCert = certChain[0] as java.security.cert.X509Certificate
+                Log.d("HNSGo", "DoH: Server cert subject: ${serverCert.subjectDN}")
+                Log.d("HNSGo", "DoH: Server cert issuer: ${serverCert.issuerDN}")
+                
+                // Log Subject Alternative Names
+                try {
+                    val sanExtension = serverCert.getExtensionValue("2.5.29.17") // SAN OID
+                    if (sanExtension != null) {
+                        Log.d("HNSGo", "DoH: Server cert has Subject Alternative Name extension")
+                    } else {
+                        Log.w("HNSGo", "DoH: Server cert missing Subject Alternative Name extension")
+                    }
+                } catch (e: Exception) {
+                    Log.w("HNSGo", "DoH: Could not check SAN extension", e)
+                }
+                
+                if (certChain.size > 1) {
+                    val caCert = certChain[1] as java.security.cert.X509Certificate
+                    Log.d("HNSGo", "DoH: CA cert subject: ${caCert.subjectDN}")
+                    Log.d("HNSGo", "DoH: CA cert is self-signed: ${caCert.issuerDN == caCert.subjectDN}")
+                } else {
+                    Log.w("HNSGo", "DoH: WARNING - Certificate chain missing CA certificate!")
+                }
+            } else {
+                Log.e("HNSGo", "DoH: ERROR - No certificate chain found in KeyStore!")
+            }
+        } catch (e: Exception) {
+            Log.w("HNSGo", "DoH: Could not log certificate info", e)
+        }
+        
         val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
         tmf.init(keyStore)
         
@@ -484,29 +525,187 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
     }
 
     override fun serve(session: IHTTPSession): Response {
-        if (session.uri != "/dns-query" || session.method != Method.GET)
-            return NanoHTTPD.newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
+        try {
+            // Log connection info for debugging
+            val remoteAddr = session.remoteIpAddress
+            val uri = session.uri
+            val headers = session.headers
+            Log.d("HNSGo", "DoH: Connection from $remoteAddr, URI: $uri, Method: ${session.method}")
+            Log.d("HNSGo", "DoH: Headers: ${headers.keys.joinToString()}")
+            if (session.method == Method.POST) {
+                Log.d("HNSGo", "DoH: POST Content-Type: ${headers["content-type"]}, Content-Length: ${headers["content-length"]}")
+            } else if (session.method == Method.GET) {
+                Log.d("HNSGo", "DoH: GET Query string: ${session.queryParameterString}, Params: ${session.parms}")
+            }
+            
+            if (session.uri != "/dns-query") {
+                return NanoHTTPD.newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
+            }
 
-        val dnsB64 = session.queryParameterString?.removePrefix("dns=") ?: return bad()
-        val query = java.util.Base64.getUrlDecoder().decode(dnsB64)
-        val msg = try { Message(query) } catch (e: Exception) { return bad() }
-        val questions = msg.getSection(Section.QUESTION)
-        if (questions.isEmpty()) return bad()
-        val q = questions[0]
-        val nameStr = q.name.toString(true)
-        // CRITICAL: Handshake TLDs can contain symbols and mixed case!
-        // We MUST NOT normalize - preserve the exact name as received
-        // DNS queries are case-insensitive, but Handshake name hashing is case-sensitive
-        val name = nameStr as String
-        val type = q.type
+            // Handle both GET and POST methods (RFC 8484)
+            val queryBytes: ByteArray = when (session.method) {
+                Method.GET -> {
+                    // GET: DNS query is base64url-encoded in 'dns' query parameter
+                    // Check both parms and queryParameterString for compatibility
+                    val dnsParam = session.parms["dns"] 
+                        ?: session.queryParameterString?.let { 
+                            // Try to extract from query string manually if parms doesn't work
+                            val match = Regex("dns=([^&]*)").find(it)
+                            match?.groupValues?.get(1)
+                        }
+                    
+                    if (dnsParam.isNullOrEmpty()) {
+                        Log.w("HNSGo", "DoH: GET request missing 'dns' parameter. Query string: ${session.queryParameterString}, Params: ${session.parms}")
+                        // Return a proper error response instead of bad()
+                        return NanoHTTPD.newFixedLengthResponse(
+                            Status.BAD_REQUEST, 
+                            "application/dns-message",
+                            "Missing 'dns' query parameter"
+                        )
+                    }
+                    try {
+                        // Base64url decode (RFC 8484 uses base64url, not standard base64)
+                        java.util.Base64.getUrlDecoder().decode(dnsParam)
+                    } catch (e: Exception) {
+                        Log.e("HNSGo", "DoH: Failed to decode base64url query parameter: $dnsParam", e)
+                        return NanoHTTPD.newFixedLengthResponse(
+                            Status.BAD_REQUEST,
+                            "application/dns-message", 
+                            "Invalid 'dns' parameter encoding"
+                        )
+                    }
+                }
+                Method.POST -> {
+                    // POST: DNS query is in request body as binary (RFC 8484)
+                    // Content-Type should be application/dns-message
+                    try {
+                        val contentType = session.headers["content-type"]?.lowercase()
+                        if (contentType != null && !contentType.contains("application/dns-message")) {
+                            Log.w("HNSGo", "DoH: POST request has unexpected Content-Type: $contentType")
+                        }
+                        
+                        // Read request body - try content-length first, then read available bytes
+                        val contentLength = session.headers["content-length"]?.toIntOrNull()
+                        val buffer = if (contentLength != null && contentLength > 0) {
+                            // Use content-length if available
+                            if (contentLength > 65535) { // DNS message max size
+                                Log.e("HNSGo", "DoH: POST request body too large: $contentLength bytes")
+                                return NanoHTTPD.newFixedLengthResponse(
+                                    Status.BAD_REQUEST,
+                                    "application/dns-message",
+                                    "Request body too large"
+                                )
+                            }
+                            val buf = ByteArray(contentLength)
+                            var totalRead = 0
+                            while (totalRead < contentLength) {
+                                val read = session.inputStream.read(buf, totalRead, contentLength - totalRead)
+                                if (read == -1) break
+                                totalRead += read
+                            }
+                            if (totalRead < contentLength) {
+                                Log.w("HNSGo", "DoH: POST request body incomplete: read $totalRead of $contentLength bytes")
+                            }
+                            buf.sliceArray(0 until totalRead)
+                        } else {
+                            // No content-length, read available bytes (up to DNS max size)
+                            val available = session.inputStream.available()
+                            if (available <= 0) {
+                                Log.e("HNSGo", "DoH: POST request has no body data")
+                                return NanoHTTPD.newFixedLengthResponse(
+                                    Status.BAD_REQUEST,
+                                    "application/dns-message",
+                                    "Missing request body"
+                                )
+                            }
+                            val maxSize = 65535
+                            val size = minOf(available, maxSize)
+                            val buf = ByteArray(size)
+                            val totalRead = session.inputStream.read(buf)
+                            if (totalRead > 0) {
+                                buf.sliceArray(0 until totalRead)
+                            } else {
+                                Log.e("HNSGo", "DoH: POST request body read returned 0 bytes")
+                                return NanoHTTPD.newFixedLengthResponse(
+                                    Status.BAD_REQUEST,
+                                    "application/dns-message",
+                                    "Empty request body"
+                                )
+                            }
+                        }
+                        
+                        if (buffer.isEmpty()) {
+                            Log.e("HNSGo", "DoH: POST request body is empty")
+                            return NanoHTTPD.newFixedLengthResponse(
+                                Status.BAD_REQUEST,
+                                "application/dns-message",
+                                "Empty request body"
+                            )
+                        }
+                        
+                        Log.d("HNSGo", "DoH: POST request body read successfully: ${buffer.size} bytes")
+                        buffer
+                    } catch (e: Exception) {
+                        Log.e("HNSGo", "DoH: Failed to read POST request body", e)
+                        return NanoHTTPD.newFixedLengthResponse(
+                            Status.BAD_REQUEST,
+                            "application/dns-message",
+                            "Error reading request body: ${e.message}"
+                        )
+                    }
+                }
+                else -> {
+                    Log.e("HNSGo", "DoH: Unsupported method: ${session.method}")
+                    return NanoHTTPD.newFixedLengthResponse(Status.METHOD_NOT_ALLOWED, "text/plain", "Method not allowed")
+                }
+            }
 
-        // Try Handshake recursive resolution first
-        val response = runBlocking { 
-            RecursiveResolver.resolve(name, type)
-        }
+            val msg = try { 
+                Message(queryBytes)
+            } catch (e: Exception) { 
+                Log.e("HNSGo", "DoH: Failed to parse DNS query (${queryBytes.size} bytes)", e)
+                // Return a proper DNS-formatted error response
+                // Try to extract query ID from raw bytes if possible
+                val queryId = if (queryBytes.size >= 2) {
+                    ((queryBytes[0].toInt() and 0xFF) shl 8) or (queryBytes[1].toInt() and 0xFF)
+                } else {
+                    0
+                }
+                val errorMsg = org.xbill.DNS.Message(queryId).apply {
+                    header.setFlag(Flags.QR.toInt())
+                    header.rcode = Rcode.FORMERR
+                }
+                val wireData = errorMsg.toWire()
+                return NanoHTTPD.newFixedLengthResponse(
+                    Status.OK,
+                    "application/dns-message",
+                    ByteArrayInputStream(wireData),
+                    wireData.size.toLong()
+                )
+            }
+            val questions = msg.getSection(Section.QUESTION)
+            if (questions.isEmpty()) {
+                Log.w("HNSGo", "DoH: DNS query has no questions")
+                return createDnsErrorResponse(Rcode.FORMERR, "No questions in DNS query", msg)
+            }
+            val q = questions[0]
+            val nameStr = q.name.toString(true)
+            // CRITICAL: Handshake TLDs can contain symbols and mixed case!
+            // We MUST NOT normalize - preserve the exact name as received
+            // DNS queries are case-insensitive, but Handshake name hashing is case-sensitive
+            val name = nameStr as String
+            val type = q.type
+
+            Log.d("HNSGo", "DoH: Resolving $name (type ${Type.string(type)})")
+
+            // Try Handshake recursive resolution first
+            val response = runBlocking { 
+                RecursiveResolver.resolve(name, type)
+            }
         
         // If recursive resolution succeeded, return the response
         if (response != null) {
+            Log.d("HNSGo", "DoH: Resolution successful for $name, returning ${response.getSection(Section.ANSWER).size} answers")
             // Copy response but preserve original query ID
             val resp = org.xbill.DNS.Message(msg.header.id).apply {
                 header.setFlag(Flags.QR.toInt())
@@ -543,6 +742,7 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             }
             
             val wireData = resp.toWire()
+            Log.d("HNSGo", "DoH: Sending response (${wireData.size} bytes) for $name")
             return NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())
         }
         
@@ -551,6 +751,34 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         // 2. TLD found but nameserver queries timed out/failed
         // Fall back to regular DNS
         return forwardToDns(msg, name)
+        } catch (e: java.net.SocketException) {
+            // Socket was closed - likely Firefox rejected the certificate or closed connection
+            if (e.message?.contains("closed") == true || e.message?.contains("Socket is closed") == true) {
+                Log.e("HNSGo", "DoH: Socket closed by client during SSL handshake. " +
+                        "This indicates Firefox does NOT trust the certificate.\n" +
+                        "TROUBLESHOOTING:\n" +
+                        "1. Verify CA cert is installed: Android Settings → Security → Encryption & credentials → User certificates → CA certificates\n" +
+                        "2. Verify Firefox setting: Firefox → Settings → About Firefox → Tap logo 7x → Enable 'Use third party CA certificates'\n" +
+                        "3. FULLY RESTART Firefox (close all tabs, force stop, restart)\n" +
+                        "4. Test certificate: Open https://127.0.0.1:${Config.DOH_PORT}/dns-query in Firefox - you should see certificate error if not trusted")
+            } else {
+                Log.e("HNSGo", "DoH: Socket error from ${session.remoteIpAddress}", e)
+            }
+            // Re-throw to let NanoHTTPD handle it gracefully
+            throw e
+        } catch (e: javax.net.ssl.SSLException) {
+            // SSL handshake failed
+            Log.e("HNSGo", "DoH: SSL handshake failed from ${session.remoteIpAddress}. " +
+                    "Firefox rejected the certificate during handshake.\n" +
+                    "Verify: 1) CA cert installed as 'CA certificate' (not 'User certificate'), " +
+                    "2) Firefox 'Use third party CA certificates' enabled, " +
+                    "3) Firefox fully restarted (not just tabs closed)", e)
+            throw e
+        } catch (e: Exception) {
+            Log.e("HNSGo", "DoH: Unexpected error while processing request from ${session.remoteIpAddress}", e)
+            // Return a generic error response
+            return NanoHTTPD.newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Internal server error")
+        }
     }
 
     private fun forwardToDns(query: org.xbill.DNS.Message, name: String? = null): Response {
@@ -582,7 +810,44 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         }
     }
 
-    private fun bad() = NanoHTTPD.newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Bad request")
+    /**
+     * Create a proper DNS-formatted error response (RFC 8484)
+     * Always returns Content-Type: application/dns-message with a valid DNS message
+     */
+    private fun createDnsErrorResponse(rcode: Int, errorMessage: String, originalQuery: org.xbill.DNS.Message? = null): Response {
+        try {
+            val queryId = originalQuery?.header?.id ?: 0
+            val resp = org.xbill.DNS.Message(queryId).apply {
+                header.setFlag(Flags.QR.toInt())
+                header.rcode = rcode
+                // Include original question if available
+                if (originalQuery != null) {
+                    val questions = originalQuery.getSection(Section.QUESTION)
+                    if (questions.isNotEmpty()) {
+                        addRecord(questions[0], Section.QUESTION)
+                    }
+                }
+            }
+            val wireData = resp.toWire()
+            Log.d("HNSGo", "DoH: Returning DNS error response: $rcode - $errorMessage")
+            return NanoHTTPD.newFixedLengthResponse(
+                Status.OK, // DNS errors still use HTTP 200 with error in DNS rcode
+                "application/dns-message",
+                ByteArrayInputStream(wireData),
+                wireData.size.toLong()
+            )
+        } catch (e: Exception) {
+            Log.e("HNSGo", "DoH: Failed to create DNS error response", e)
+            // Fallback to plain text error
+            return NanoHTTPD.newFixedLengthResponse(
+                Status.BAD_REQUEST,
+                "text/plain",
+                "Error: $errorMessage"
+            )
+        }
+    }
+    
+    private fun bad() = NanoHTTPD.newFixedLengthResponse(Status.BAD_REQUEST, "application/dns-message", "")
     private fun nxdomain(q: org.xbill.DNS.Message): Response {
         val questions = q.getSection(Section.QUESTION)
         val resp = org.xbill.DNS.Message(q.header.id).apply {
