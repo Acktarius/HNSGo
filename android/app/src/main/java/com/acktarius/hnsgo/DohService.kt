@@ -20,7 +20,9 @@ import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Method
 import fi.iki.elonen.NanoHTTPD.Response
 import fi.iki.elonen.NanoHTTPD.Response.Status
+import org.xbill.DNS.AAAARecord
 import org.xbill.DNS.ARecord
+import org.xbill.DNS.CNAMERecord
 import org.xbill.DNS.DClass
 import org.xbill.DNS.Flags
 import org.xbill.DNS.Message
@@ -372,6 +374,7 @@ class DohService : Service() {
                     
                     val answers = dnsResponse.getSection(Section.ANSWER)
                     if (answers.isNotEmpty()) {
+                        // Check for A record first (direct IP address)
                         val aRecord = answers.find { it is ARecord } as? ARecord
                         if (aRecord != null && aRecord.address != null) {
                             val ipAddress = aRecord.address.hostAddress
@@ -384,8 +387,32 @@ class DohService : Service() {
                                 Log.w("HNSGo", "DohService: $testDomain A record has null address")
                             }
                         } else {
-                            sendDebugResult("⚠ No A record", "$testDomain -> No A record in response")
-                            Log.w("HNSGo", "DohService: $testDomain response has no A record")
+                            // Check for CNAME, AAAA, or other usable records (browser will follow CNAME)
+                            val cnameRecord = answers.find { it.type == Type.CNAME }
+                            val aaaaRecord = answers.find { it.type == Type.AAAA }
+                            
+                            when {
+                                cnameRecord != null -> {
+                                    // CNAME record - browser will follow it automatically
+                                    val target = cnameRecord.rdataToString()
+                                    val result = "$testDomain -> CNAME -> $target"
+                                    sendDebugResult("✓ DNS resolution successful (CNAME)", result)
+                                    Log.d("HNSGo", "DohService: $testDomain resolved to CNAME $target via DoH")
+                                }
+                                aaaaRecord != null -> {
+                                    // AAAA record (IPv6)
+                                    val ipAddress = aaaaRecord.rdataToString()
+                                    val result = "$testDomain -> $ipAddress (AAAA)"
+                                    sendDebugResult("✓ DNS resolution successful (AAAA)", result)
+                                    Log.d("HNSGo", "DohService: $testDomain resolved to $ipAddress (AAAA) via DoH")
+                                }
+                                else -> {
+                                    // No A, CNAME, or AAAA record - log what we got
+                                    val recordTypes = answers.map { "${Type.string(it.type)}(${it.rdataToString()})" }.joinToString(", ")
+                                    sendDebugResult("⚠ No A/CNAME/AAAA record", "$testDomain -> Records: $recordTypes")
+                                    Log.w("HNSGo", "DohService: $testDomain response has no A/CNAME/AAAA record (got: $recordTypes)")
+                                }
+                            }
                         }
                     } else {
                         val rcode = dnsResponse.rcode
@@ -489,9 +516,9 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
                 }
                 
                 // Copy question
-                val questions = response.getSection(Section.QUESTION)
-                if (questions.isNotEmpty()) {
-                    addRecord(questions[0], Section.QUESTION)
+                val responseQuestions = response.getSection(Section.QUESTION)
+                if (responseQuestions.isNotEmpty()) {
+                    addRecord(responseQuestions[0], Section.QUESTION)
                 } else {
                     addRecord(q, Section.QUESTION)
                 }
@@ -519,15 +546,29 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             return NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())
         }
         
-        // If not found in Handshake, fall back to regular DNS
-        return forwardToDns(msg)
+        // Handshake resolution failed - could be:
+        // 1. TLD not found in blockchain
+        // 2. TLD found but nameserver queries timed out/failed
+        // Fall back to regular DNS
+        return forwardToDns(msg, name)
     }
 
-    private fun forwardToDns(query: org.xbill.DNS.Message): Response {
+    private fun forwardToDns(query: org.xbill.DNS.Message, name: String? = null): Response {
         return try {
             val questions = query.getSection(Section.QUESTION)
-            val domainName = if (questions.isNotEmpty()) questions[0].name.toString() else "unknown"
-            Log.d("HNSGo", "Forwarding to regular DNS (not found in Handshake): $domainName")
+            val domainName = name ?: (if (questions.isNotEmpty()) questions[0].name.toString() else "unknown")
+            // Check if TLD exists in Handshake (was found but nameserver queries failed)
+            val tld = ResourceRecord.extractTLD(domainName)
+            val tldFound = runBlocking {
+                val records = SpvClient.resolve(tld)
+                records != null && records.isNotEmpty()
+            }
+            
+            if (tldFound) {
+                Log.d("HNSGo", "Forwarding to regular DNS (Handshake TLD '$tld' found but nameserver queries failed): $domainName")
+            } else {
+                Log.d("HNSGo", "Forwarding to regular DNS (TLD '$tld' not found in Handshake): $domainName")
+            }
             val response = runBlocking {
                 withContext(Dispatchers.IO) {
                     fallbackResolver.send(query)
@@ -710,6 +751,17 @@ class LocalDoTServer {
         }
     }
 
+    /**
+     * Process DNS query and return response
+     * 
+     * For web browsing (HTTP/HTTPS), valid answers include:
+     * - A record (IPv4 address) - direct connection
+     * - AAAA record (IPv6 address) - direct IPv6 connection  
+     * - CNAME record - browser will automatically follow to get A/AAAA
+     * 
+     * The browser handles CNAME resolution automatically, so we just return
+     * whatever the nameserver provides. No need to validate record types here.
+     */
     private fun processDnsQuery(query: org.xbill.DNS.Message): org.xbill.DNS.Message {
         val questions = query.getSection(Section.QUESTION)
         if (questions.isEmpty()) {
@@ -726,7 +778,8 @@ class LocalDoTServer {
             RecursiveResolver.resolve(name, type)
         }
         
-        // If recursive resolution succeeded, return the response
+        // If recursive resolution succeeded, return the response as-is
+        // Browser will handle A, AAAA, or CNAME records appropriately
         if (response != null) {
             // Copy response but preserve original query ID
             val resp = org.xbill.DNS.Message(query.header.id).apply {
@@ -746,31 +799,51 @@ class LocalDoTServer {
                 
                 // Copy answer section
                 val answers = response.getSection(Section.ANSWER)
+                val answerTypes = answers.map { record ->
+                    "${Type.string(record.type)}(${record.rdataToString()})"
+                }.joinToString(", ")
+                Log.d("HNSGo", "DohService: Copying ${answers.size} answer records: [$answerTypes]")
                 for (record in answers) {
                     addRecord(record, Section.ANSWER)
                 }
                 
                 // Copy authority section
                 val authority = response.getSection(Section.AUTHORITY)
+                Log.d("HNSGo", "DohService: Copying ${authority.size} authority records")
                 for (record in authority) {
                     addRecord(record, Section.AUTHORITY)
                 }
                 
                 // Copy additional section
                 val additional = response.getSection(Section.ADDITIONAL)
+                Log.d("HNSGo", "DohService: Copying ${additional.size} additional records")
                 for (record in additional) {
                     addRecord(record, Section.ADDITIONAL)
                 }
             }
             
+            // Verify the response has the answer
+            val finalAnswers = resp.getSection(Section.ANSWER)
+            Log.d("HNSGo", "DohService: Final response has ${finalAnswers.size} answer records")
+            
             return resp
         }
         
-        // If not found in Handshake, fall back to regular DNS
+        // Handshake resolution failed - fall back to regular DNS
+        val domainName = nameStr
+        val tld = ResourceRecord.extractTLD(domainName)
+        val tldFound = runBlocking {
+            val records = SpvClient.resolve(tld)
+            records != null && records.isNotEmpty()
+        }
+        
+        if (tldFound) {
+            Log.d("HNSGo", "DoT: Forwarding to regular DNS (Handshake TLD '$tld' found but nameserver queries failed): $domainName")
+        } else {
+            Log.d("HNSGo", "DoT: Forwarding to regular DNS (TLD '$tld' not found in Handshake): $domainName")
+        }
+        
         return try {
-            val queryQuestions = query.getSection(Section.QUESTION)
-            val domainName = if (queryQuestions.isNotEmpty()) queryQuestions[0].name.toString() else "unknown"
-            Log.d("HNSGo", "DoT: Forwarding to regular DNS (not found in Handshake): $domainName")
             runBlocking {
                 withContext(Dispatchers.IO) {
                     fallbackResolver.send(query)

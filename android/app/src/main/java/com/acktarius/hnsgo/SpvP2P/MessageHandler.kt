@@ -23,6 +23,7 @@ internal object MessageHandler {
     private const val HSK_MSG_PONG = 3
     private const val HSK_MSG_GETADDR = 4
     private const val HSK_MSG_ADDR = 5
+    private const val HSK_MSG_INV = 6  // Inventory (from hsd - not in hnsd but used by full nodes)
     private const val HSK_MSG_GETHEADERS = 10  // FIXED: was 6, should be 10 (from msg.h:19)
     private const val HSK_MSG_HEADERS = 11     // FIXED: was 7, should be 11 (from msg.h:20)
     private const val HSK_MSG_SENDHEADERS = 12 // FIXED: was 8, should be 12 (from msg.h:21)
@@ -40,6 +41,7 @@ internal object MessageHandler {
             "pong" -> HSK_MSG_PONG
             "getaddr" -> HSK_MSG_GETADDR
             "addr" -> HSK_MSG_ADDR
+            "inv" -> HSK_MSG_INV
             "getheaders" -> HSK_MSG_GETHEADERS
             "headers" -> HSK_MSG_HEADERS
             "sendheaders" -> HSK_MSG_SENDHEADERS
@@ -58,6 +60,7 @@ internal object MessageHandler {
             HSK_MSG_PONG -> "pong"
             HSK_MSG_GETADDR -> "getaddr"
             HSK_MSG_ADDR -> "addr"
+            HSK_MSG_INV -> "inv"
             HSK_MSG_GETHEADERS -> "getheaders"
             HSK_MSG_HEADERS -> "headers"
             HSK_MSG_SENDHEADERS -> "sendheaders"

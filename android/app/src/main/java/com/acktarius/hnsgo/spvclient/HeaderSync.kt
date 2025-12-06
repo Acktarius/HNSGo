@@ -60,8 +60,9 @@ object HeaderSync {
         getChainHeight: () -> Int,
         firstInMemoryHeight: Int,
         maxInMemoryHeaders: Int,
-        onHeaderAdded: (Header) -> Unit,
-        saveHeaders: suspend () -> Unit
+        onHeaderAdded: (Header, Int) -> Unit,  // Header and its actual height
+        saveHeaders: suspend () -> Unit,
+        knownNetworkHeight: Int? = null  // Optional: if we know network height, reject headers ahead of it
     ): Int? = withContext(Dispatchers.IO) {
         android.util.Log.d("HNSGo", "HeaderSync: Starting P2P header sync...")
         
@@ -149,11 +150,17 @@ object HeaderSync {
                     android.util.Log.d("HNSGo", "HeaderSync: Rejecting header - doesn't connect to tip (prevBlock mismatch). Expected height: $expectedHeight. Continuing to check for new headers in batch...")
                     false  // Reject but continue processing batch
                 } else {
-                    // Second check: validate the header (duplicate check, etc.)
-                    if (validateHeader(header, preComputedHash, headerChain, expectedHeight)) {
-                        headerChain.add(header)
-                        newHeadersCount++
-                        localCurrentHeight++  // Update local tracker immediately
+                    // CRITICAL: Reject headers that are ahead of known network height (matching hnsd behavior)
+                    // hnsd/hsd only accept headers up to the network height to prevent being ahead
+                    if (knownNetworkHeight != null && expectedHeight > knownNetworkHeight) {
+                        android.util.Log.d("HNSGo", "HeaderSync: Rejecting header at height $expectedHeight - ahead of known network height $knownNetworkHeight (matching hnsd behavior)")
+                        false  // Reject but continue processing batch
+                    } else {
+                        // Second check: validate the header (duplicate check, etc.)
+                        if (validateHeader(header, preComputedHash, headerChain, expectedHeight)) {
+                            headerChain.add(header)
+                            newHeadersCount++
+                            localCurrentHeight++  // Update local tracker immediately
                         
                         // Add to HashSet for O(1) duplicate detection
                         synchronized(headerHashes) {
@@ -180,11 +187,12 @@ object HeaderSync {
                             }
                         }
                         
-                        onHeaderAdded(header)  // Update SpvClient's chainHeight
-                        true
-                    } else {
-                        android.util.Log.w("HNSGo", "HeaderSync: Invalid header at height $expectedHeight")
-                        false
+                            onHeaderAdded(header, expectedHeight)  // Update SpvClient's chainHeight with actual height
+                            true
+                        } else {
+                            android.util.Log.w("HNSGo", "HeaderSync: Invalid header at height $expectedHeight")
+                            false
+                        }
                     }
                 }
             },

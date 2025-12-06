@@ -11,15 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.xbill.DNS.ARecord
 import org.xbill.DNS.CNAMERecord
-import org.xbill.DNS.DClass
-import org.xbill.DNS.Message
-import org.xbill.DNS.Name
-import org.xbill.DNS.Rcode
 import org.xbill.DNS.Record as DNSRecord
 import org.xbill.DNS.Section
-import org.xbill.DNS.SimpleResolver
 import org.xbill.DNS.TLSARecord
-import org.xbill.DNS.Type
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -39,14 +33,19 @@ object NameResolver {
     suspend fun resolve(
         name: String,
         headerChain: List<Header>,
-        chainHeight: Int,
-        resolverHost: String,
-        resolverPort: Int
+        chainHeight: Int
     ): List<com.acktarius.hnsgo.Record>? = withContext(Dispatchers.IO) {
         android.util.Log.d("HNSGo", "NameResolver: Resolving Handshake domain: $name")
         
         val tld = ResourceRecord.extractTLD(name)
         android.util.Log.d("HNSGo", "NameResolver: Resolving domain '$name' -> TLD: '$tld'")
+        
+        // Check blacklist (matching hnsd ns.c:475-503)
+        // Blacklisted TLDs are reserved for other naming systems and should return NXDOMAIN
+        if (Config.BLACKLISTED_TLDS.contains(tld.lowercase())) {
+            android.util.Log.d("HNSGo", "NameResolver: TLD '$tld' is blacklisted (reserved for other naming systems)")
+            return@withContext null
+        }
         
         val minRequiredHeight = Config.CHECKPOINT_HEIGHT + 1000
         if (chainHeight < minRequiredHeight) {
@@ -56,12 +55,23 @@ object NameResolver {
         val cached = CacheManager.get(tld, 1)
         if (cached != null) {
             android.util.Log.d("HNSGo", "NameResolver: Found cached record for TLD '$tld'")
-            return@withContext parseRecords(cached)
+            // Parse cached Handshake records and convert to DNS format (matching fresh query behavior)
+            val cachedHandshakeRecords = parseRecords(cached)
+            if (cachedHandshakeRecords.isNotEmpty()) {
+                val cachedDnsRecords = ResourceRecord.convertHandshakeRecordsToDNS(cachedHandshakeRecords)
+                android.util.Log.d("HNSGo", "NameResolver: Retrieved ${cachedDnsRecords.size} DNS records from cache for '$name'")
+                return@withContext cachedDnsRecords
+            }
         }
 
         if (chainHeight >= minRequiredHeight) {
             val tldHash = computeNameHash(tld)
             val tldHashHex = tldHash.joinToString("") { "%02x".format(it) }
+            android.util.Log.w("HNSGo", "NameResolver: ========== QUERYING BLOCKCHAIN ==========")
+            android.util.Log.w("HNSGo", "NameResolver: Full domain: '$name'")
+            android.util.Log.w("HNSGo", "NameResolver: Extracted TLD: '$tld'")
+            android.util.Log.w("HNSGo", "NameResolver: TLD hash (SHA3-256): $tldHashHex")
+            android.util.Log.w("HNSGo", "NameResolver: ======================================")
             android.util.Log.d("HNSGo", "NameResolver: Querying blockchain for TLD '$tld' (hash: $tldHashHex)")
             val blockchainRecords = resolveFromBlockchain(tld, tldHash, headerChain, chainHeight)
             if (blockchainRecords != null && blockchainRecords.isNotEmpty()) {
@@ -71,67 +81,12 @@ object NameResolver {
                     android.util.Log.d("HNSGo", "NameResolver: Converted to ${dnsRecords.size} DNS records for '$name'")
                     val proofData = convertRecordsToProof(blockchainRecords, tld)
                     CacheManager.put(tld, 1, proofData, Config.DNS_CACHE_TTL_SECONDS)
+                    android.util.Log.d("HNSGo", "NameResolver: Cached TLD '$tld' for ${Config.DNS_CACHE_TTL_SECONDS} seconds (6 hours)")
                     return@withContext dnsRecords
                 }
             }
         } else {
             android.util.Log.w("HNSGo", "NameResolver: Skipping blockchain resolution - not enough headers synced yet (height: $chainHeight)")
-        }
-        
-        // DEVELOPMENT ONLY: Fallback to external resolver
-        android.util.Log.w("HNSGo", "NameResolver: [DEV] Blockchain resolution unavailable, falling back to external resolver")
-        try {
-            val resolver = SimpleResolver(resolverHost).apply { port = resolverPort }
-            val query = Message.newQuery(DNSRecord.newRecord(Name.fromString("$name."), Type.A, DClass.IN))
-            resolver.timeout = java.time.Duration.ofSeconds(5)
-            
-            val response = try {
-                resolver.send(query)
-            } catch (e: java.net.PortUnreachableException) {
-                android.util.Log.w("HNSGo", "NameResolver: Port unreachable - resolver may not be running")
-                return@withContext null
-            } catch (e: java.net.SocketTimeoutException) {
-                android.util.Log.w("HNSGo", "NameResolver: DNS query timeout")
-                return@withContext null
-            } catch (e: java.net.ConnectException) {
-                android.util.Log.w("HNSGo", "NameResolver: Connection refused")
-                return@withContext null
-            }
-            
-            if (response.rcode == Rcode.NOERROR) {
-                val records = mutableListOf<com.acktarius.hnsgo.Record>()
-                val answers = response.getSection(Section.ANSWER)
-                
-                for (rrecord in answers) {
-                    val hnsRecord: com.acktarius.hnsgo.Record? = when (rrecord) {
-                        is ARecord -> {
-                            val ip = rrecord.address.hostAddress
-                            if (ip != null) {
-                                com.acktarius.hnsgo.Record(1, ip.toByteArray())
-                            } else {
-                                null
-                            }
-                        }
-                        is CNAMERecord -> {
-                            val target = rrecord.target.toString(true)
-                            com.acktarius.hnsgo.Record(5, target.toByteArray())
-                        }
-                        is TLSARecord -> null
-                        else -> null
-                    }
-                    if (hnsRecord != null) {
-                        records.add(hnsRecord)
-                    }
-                }
-                
-                if (records.isNotEmpty()) {
-                    val proofData = convertRecordsToProof(records, name)
-                    CacheManager.put(name, 1, proofData, Config.DNS_CACHE_TTL_SECONDS)
-                    return@withContext records
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("HNSGo", "NameResolver: Error resolving $name via DNS", e)
         }
         
         null
@@ -158,141 +113,72 @@ object NameResolver {
         
         android.util.Log.d("HNSGo", "NameResolver: Latest header height: $chainHeight")
         
-        // EXACT MATCH to hnsd: Use safe root from our own chain (hsk_chain_safe_root)
-        // hnsd pool.c:521: const uint8_t *root = hsk_chain_safe_root(&pool->chain);
-        // hnsd uses ONE root, calculated from its own chain height
-        // BUT: Peers might be slightly behind (1-2 blocks), so we should use a root that's at least 1 interval old
-        // This ensures peers that are slightly behind can still answer
-        // Start with a root that's 1 interval old, then fall back to tip root if needed
-        val interval = Config.TREE_INTERVAL
+        // Log last 10 headers for debugging
         val firstHeaderHeight = chainHeight - headerChain.size + 1
+        val lastHeaders = headerChain.takeLast(10)
+        android.util.Log.w("HNSGo", "NameResolver: Last 10 headers in chain:")
+        lastHeaders.forEachIndexed { index, header ->
+            val headerHeight = firstHeaderHeight + (headerChain.size - lastHeaders.size + index)
+            val rootHex = header.nameRoot.joinToString("") { "%02x".format(it) }
+            android.util.Log.w("HNSGo", "NameResolver:   Height $headerHeight: root=$rootHex")
+        }
         
-        // Calculate initial root from 1 interval back to ensure peers can answer
-        val initialHeight = maxOf(firstHeaderHeight, chainHeight - interval)
-        // CRITICAL: Pass actual chainHeight to getSafeRoot, not initialHeight
-        // getSafeRoot needs chainHeight to calculate firstHeaderHeight correctly
-        val safeRoot = getSafeRoot(headerChain, chainHeight, initialHeight)
+        // EXACT MATCH to hnsd's hsk_chain_safe_root (chain.c:180-209)
+        // hnsd pool.c:521: const uint8_t *root = hsk_chain_safe_root(&pool->chain);
+        val interval = Config.TREE_INTERVAL
+        var mod = chainHeight % interval
+        android.util.Log.w("HNSGo", "NameResolver: chainHeight=$chainHeight, mod=$mod")
+        
+        // If there's enough proof-of-work on top of the most recent root, it should be safe to use it
+        // EXACT MATCH to hnsd chain.c:197-198
+        if (mod >= 12) {
+            mod = 0
+            android.util.Log.w("HNSGo", "NameResolver: mod >= 12, setting mod=0")
+        }
+        
+        // EXACT MATCH to hnsd chain.c:200: uint32_t height = (uint32_t)chain->height - mod;
+        val rootHeight = chainHeight - mod
+        android.util.Log.w("HNSGo", "NameResolver: Calculated rootHeight=$rootHeight (chainHeight=$chainHeight - mod=$mod)")
+        
+        // Check if tip root is different from committed interval root
+        // If root changed at tip, peers may have indexed the new root
+        val tipRoot = latestHeader.nameRoot
+        val committedRoot = getSafeRootAtHeight(headerChain, chainHeight, rootHeight)
+        
+        val tipRootHex = tipRoot.joinToString("") { "%02x".format(it) }
+        val committedRootHex = committedRoot?.joinToString("") { "%02x".format(it) } ?: "null"
+        android.util.Log.w("HNSGo", "NameResolver: Tip root (height $chainHeight): $tipRootHex")
+        android.util.Log.w("HNSGo", "NameResolver: Committed root (height $rootHeight): $committedRootHex")
+        
+        // If tip root is different from committed root, use tip root (peers have indexed it)
+        val finalRootHeight = if (committedRoot != null && !tipRoot.contentEquals(committedRoot)) {
+            android.util.Log.w("HNSGo", "NameResolver: Root changed at tip, using tip root (height $chainHeight)")
+            chainHeight
+        } else {
+            rootHeight
+        }
+        
+        // Verify header chain has the header at finalRootHeight
+        if (finalRootHeight < firstHeaderHeight || finalRootHeight > chainHeight) {
+            android.util.Log.e("HNSGo", "NameResolver: Header chain missing header at height $finalRootHeight (range: $firstHeaderHeight to $chainHeight, size: ${headerChain.size})")
+            return@withContext null
+        }
+        
+        val safeRoot = getSafeRootAtHeight(headerChain, chainHeight, finalRootHeight)
         if (safeRoot == null) {
             android.util.Log.w("HNSGo", "NameResolver: Could not determine safe root")
             return@withContext null
         }
         
-        // VERIFICATION: Log what we're sending
-        val safeRootHex = safeRoot.joinToString("") { "%02x".format(it) }
-        val nameHashHex = nameHash.joinToString("") { "%02x".format(it) }
-        android.util.Log.w("HNSGo", "NameResolver: ========== VERIFICATION START ==========")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Querying P2P for TLD '$name'")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Network: MAINNET (magic: 0x${String.format("%08x", Config.MAGIC_MAINNET)})")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Chain height: $chainHeight")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - TLD name hash: $nameHashHex")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Expected hash (from shakeshift.com): 9881230ee09e526ce8df5b263529207286e94a7a3fa5fecf328f3e2d869fb79e")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Hash match: ${nameHashHex == "9881230ee09e526ce8df5b263529207286e94a7a3fa5fecf328f3e2d869fb79e"}")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Safe root: $safeRootHex")
-        
-        // VERIFICATION: Calculate safeHeight using same logic as getSafeRoot
-        // Reuse initialHeight from above (line 171)
-        var mod = initialHeight % interval
-        if (mod >= 12) mod = 0
-        val safeHeight = initialHeight - mod
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Safe root from height: $safeHeight (initialHeight: $initialHeight, chainHeight: $chainHeight)")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Domain registered at block 276,466 (from shakeshift.com)")
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Our height ($chainHeight) is ${chainHeight - 276466} blocks ahead of registration")
-        
-        // VERIFICATION: Verify the safeRoot matches the header at safeHeight
-        android.util.Log.w("HNSGo", "NameResolver: VERIFICATION - Header chain range: $firstHeaderHeight to $chainHeight (${headerChain.size} headers)")
-        if (safeHeight >= firstHeaderHeight && safeHeight <= chainHeight) {
-            val index = safeHeight - firstHeaderHeight
-            if (index >= 0 && index < headerChain.size) {
-                val headerAtSafeHeight = headerChain[index]
-                val headerNameRootHex = headerAtSafeHeight.nameRoot.joinToString("") { "%02x".format(it) }
-                if (headerNameRootHex != safeRootHex) {
-                    android.util.Log.e("HNSGo", "NameResolver: VERIFICATION FAILED - Safe root mismatch!")
-                    android.util.Log.e("HNSGo", "NameResolver: VERIFICATION - Header at height $safeHeight has nameRoot: $headerNameRootHex")
-                    android.util.Log.e("HNSGo", "NameResolver: VERIFICATION - But we're using safeRoot: $safeRootHex")
-                } else {
-                    android.util.Log.w("HNSGo", "NameResolver: VERIFICATION PASSED - Safe root matches header at height $safeHeight")
-                }
-            } else {
-                android.util.Log.e("HNSGo", "NameResolver: VERIFICATION - Index out of bounds: index=$index, size=${headerChain.size}")
-            }
-        } else {
-            android.util.Log.e("HNSGo", "NameResolver: VERIFICATION - Safe height $safeHeight is outside header chain range ($firstHeaderHeight to $chainHeight)")
-        }
-        android.util.Log.w("HNSGo", "NameResolver: ========== VERIFICATION END ==========")
-        
-        // CRITICAL: Try multiple roots to handle peers that are slightly behind
-        // Strategy: Start with a root that's 1 interval old (most likely to work with peers),
-        // then try tip root, then even older roots
-        val rootsToTry = mutableListOf<Pair<ByteArray, Int>>()
-        
-        // 1. Add the initial root (1 interval old, calculated above)
-        rootsToTry.add(Pair(safeRoot, safeHeight))
-        
-        // 2. Also try tip root (as hnsd does) - peers at same height will have this
-        val tipRoot = getSafeRoot(headerChain, chainHeight, null)
-        if (tipRoot != null) {
-            var tipMod = chainHeight % interval
-            if (tipMod >= 12) tipMod = 0
-            val tipSafeHeight = chainHeight - tipMod
-            if (tipSafeHeight != safeHeight) {
-                rootsToTry.add(Pair(tipRoot, tipSafeHeight))
-                android.util.Log.w("HNSGo", "NameResolver: Will also try tip root from height $tipSafeHeight")
-            }
-        }
-        
-        // 3. Try roots from 2-3 intervals back as fallback
-        for (i in 2..3) {
-            val olderHeight = safeHeight - (interval * i)
-            if (olderHeight >= firstHeaderHeight && olderHeight <= chainHeight && olderHeight >= 0) {
-                val index = olderHeight - firstHeaderHeight
-                if (index >= 0 && index < headerChain.size) {
-                    val olderHeader = headerChain[index]
-                    rootsToTry.add(Pair(olderHeader.nameRoot, olderHeight))
-                    android.util.Log.w("HNSGo", "NameResolver: Will also try root from height $olderHeight as fallback")
-                }
-            }
-        }
+        val rootHex = safeRoot.joinToString("") { "%02x".format(it) }
+        android.util.Log.w("HNSGo", "NameResolver: Using root from height $finalRootHeight (chainHeight=$chainHeight, mod=$mod, headerRange=$firstHeaderHeight-$chainHeight): $rootHex")
         
         try {
-            // Query with safe root (matching hnsd pool.c:521 - uses ONE root)
-            // hnsd uses its own chain's safe root and does NOT adjust for peer height
-            // But we'll try multiple roots if the first one fails (peers might be behind)
-            // CRITICAL: Try each root with a few peers first, then move to next root if it fails
-            // This allows us to quickly test if a root works, rather than trying all 60 peers with one root
-            var nameQueryResult: SpvP2P.NameQueryResult? = null
-            for ((root, rootHeight) in rootsToTry) {
-                val rootHex = root.joinToString("") { "%02x".format(it) }
-                android.util.Log.w("HNSGo", "NameResolver: Trying root from height $rootHeight: $rootHex")
-                
-                // Try this root with a limited number of peers first (5 peers)
-                // If it fails, try the next root rather than exhausting all 60 peers
-                // Pass headerChain so queryNameFromPeer can adjust root based on peer height
-                nameQueryResult = SpvP2P.queryName(nameHash, root, chainHeight, headerChain, maxPeers = 5)
-                
-                when (nameQueryResult) {
-                    is SpvP2P.NameQueryResult.Success -> {
-                        android.util.Log.w("HNSGo", "NameResolver: Success with root from height $rootHeight")
-                        break
-                    }
-                    is SpvP2P.NameQueryResult.NotFound -> {
-                        android.util.Log.w("HNSGo", "NameResolver: Notfound with root from height $rootHeight after trying 5 peers, trying next root...")
-                        continue
-                    }
-                    is SpvP2P.NameQueryResult.Error -> {
-                        android.util.Log.w("HNSGo", "NameResolver: Error with root from height $rootHeight, trying next root...")
-                        continue
-                    }
-                }
-            }
+            // Query with safe root - ConnectionManager will handshake first, get peer height,
+            // then adjust root based on peer's height before sending query
+            val nameQueryResult = SpvP2P.queryName(nameHash, safeRoot, chainHeight, headerChain)
             
-        // If all roots failed with limited peers, try the first (tip) root with all peers as final attempt
-        if (nameQueryResult !is SpvP2P.NameQueryResult.Success && rootsToTry.isNotEmpty()) {
-            val (tipRoot, tipHeight) = rootsToTry[0]
-            android.util.Log.w("HNSGo", "NameResolver: All roots failed with limited peers, trying tip root (height $tipHeight) with all peers as final attempt...")
-            nameQueryResult = SpvP2P.queryName(nameHash, tipRoot, chainHeight, headerChain)
-        }
-            
-            val finalResult = nameQueryResult ?: SpvP2P.NameQueryResult.NotFound
+            val finalResult = nameQueryResult
                 
             when (finalResult) {
                 is SpvP2P.NameQueryResult.Success -> {
@@ -304,13 +190,8 @@ object NameResolver {
                         return@withContext null
                     }
                     
-                    // Find which root succeeded (use the last one we tried, or safeRoot as fallback)
-                    var verifiedRoot = safeRoot
-                    for ((root, _) in rootsToTry.reversed()) {
-                        // Try to verify with this root
-                        verifiedRoot = root
-                        break
-                    }
+                    // Use safe root for verification
+                    val verifiedRoot = safeRoot
                     
                     // Use Proof.kt to verify proof (matching hnsd's hsk_proof_verify)
                     val parsedProof = Proof.parseProof(proof)
@@ -338,7 +219,37 @@ object NameResolver {
                     }
                 }
                 is SpvP2P.NameQueryResult.NotFound -> {
-                    android.util.Log.d("HNSGo", "NameResolver: Domain not found in blockchain")
+                    // Bounded fallback: try previous committed interval root (max 2 attempts)
+                    android.util.Log.d("HNSGo", "NameResolver: notfound, trying previous interval root")
+                    val treeInterval = Config.TREE_INTERVAL
+                    val currentMod = chainHeight % treeInterval
+                    val currentCommittedHeight = chainHeight - currentMod
+                    val previousCommittedHeight = currentCommittedHeight - treeInterval
+                    
+                    if (previousCommittedHeight >= 0) {
+                        val previousRoot = getSafeRootAtHeight(headerChain, chainHeight, previousCommittedHeight)
+                        if (previousRoot != null) {
+                            android.util.Log.d("HNSGo", "NameResolver: Trying previous interval (height: $previousCommittedHeight)")
+                            val fallbackResult = SpvP2P.queryName(nameHash, previousRoot, chainHeight, headerChain)
+                            
+                            if (fallbackResult is SpvP2P.NameQueryResult.Success) {
+                                val proof = fallbackResult.proof
+                                if (proof != null) {
+                                    val parsedProof = Proof.parseProof(proof)
+                                    if (parsedProof != null) {
+                                        val verifyResult = Proof.verifyProof(previousRoot, nameHash, parsedProof)
+                                        if (verifyResult.success && verifyResult.exists && verifyResult.data != null) {
+                                            val records = parseResourceRecordsFromProof(verifyResult.data)
+                                            if (records.isNotEmpty()) {
+                                                android.util.Log.d("HNSGo", "NameResolver: Resolved with previous interval root")
+                                                return@withContext records
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     return@withContext null
                 }
                 is SpvP2P.NameQueryResult.Error -> {
@@ -350,6 +261,49 @@ object NameResolver {
         }
         
         null
+    }
+    
+    /**
+     * Get safe root for a peer's height (public function for ConnectionManager)
+     * 
+     * CRITICAL: For peer queries, always use a committed interval root (not current tip)
+     * Even if mod >= 12, use the last committed interval to ensure the peer has indexed it
+     * The current tip root might not be indexed yet by the peer's name tree index
+     * 
+     * hnsd uses pool->chain.tip->name_root, but that's hnsd's own safe root (which may be
+     * from a committed interval if mod < 12). For peer queries, we need to ensure the peer
+     * has the root, so we use the committed interval.
+     */
+    fun getSafeRootForPeer(headerChain: List<Header>, ourChainHeight: Int, peerHeight: Int): ByteArray? {
+        if (headerChain.isEmpty()) {
+            return null
+        }
+        
+        // For peer queries, always use the last committed interval root
+        // This ensures the peer has definitely indexed this root in its name tree
+        val interval = Config.TREE_INTERVAL  // 36 blocks on mainnet
+        val mod = peerHeight % interval
+        
+        android.util.Log.d("HNSGo", "NameResolver: getSafeRootForPeer - peerHeight=$peerHeight, mod=$mod")
+        
+        // Always use the last committed interval (don't use current tip even if mod >= 12)
+        // The current tip root might not be indexed yet by the peer
+        val committedHeight = peerHeight - mod
+        
+        // If peerHeight is exactly on an interval boundary (mod=0), go back one interval
+        // to ensure the peer has definitely indexed it
+        val rootHeight = if (mod == 0) {
+            val previousIntervalHeight = committedHeight - interval
+            android.util.Log.d("HNSGo", "NameResolver: getSafeRootForPeer - peerHeight is on interval boundary, using previous interval: $previousIntervalHeight")
+            previousIntervalHeight
+        } else {
+            committedHeight
+        }
+        
+        android.util.Log.d("HNSGo", "NameResolver: getSafeRootForPeer - calculated rootHeight=$rootHeight (using committed interval root for peer queries)")
+        
+        // Get root from the committed interval (guaranteed to be indexed by peer)
+        return getSafeRootAtHeight(headerChain, ourChainHeight, rootHeight)
     }
     
     /**
@@ -391,7 +345,7 @@ object NameResolver {
      * hsk_chain_get_by_height(chain, height) -> returns header at that height
      * Returns prev->name_root
      */
-    private fun getSafeRootAtHeight(headerChain: List<Header>, chainHeight: Int, targetHeight: Int): ByteArray? {
+    fun getSafeRootAtHeight(headerChain: List<Header>, chainHeight: Int, targetHeight: Int): ByteArray? {
         if (headerChain.isEmpty()) {
             return null
         }
@@ -406,14 +360,15 @@ object NameResolver {
             // We have this header in memory
             val index = targetHeight - firstHeaderHeight
             if (index >= 0 && index < headerChain.size) {
-                headerChain[index]
+                val header = headerChain[index]
+                val rootHex = header.nameRoot.joinToString("") { "%02x".format(it) }
+                android.util.Log.d("HNSGo", "NameResolver: Using root from header at height $targetHeight: $rootHex")
+                header
             } else {
-                // This shouldn't happen if calculation is correct
                 android.util.Log.w("HNSGo", "NameResolver: Index calculation error (index=$index, size=${headerChain.size})")
                 null
             }
         } else {
-            // Target height is beyond what we have - this shouldn't happen for safe root
             android.util.Log.w("HNSGo", "NameResolver: Target height $targetHeight is beyond available headers (first: $firstHeaderHeight, last: $chainHeight)")
             null
         }
@@ -423,8 +378,6 @@ object NameResolver {
             return null
         }
         
-        val rootHex = safeHeader.nameRoot.joinToString("") { "%02x".format(it) }
-        android.util.Log.d("HNSGo", "NameResolver: Using safe root from height $targetHeight (chain height: $chainHeight, root: $rootHex)")
         return safeHeader.nameRoot
     }
     
@@ -449,10 +402,9 @@ object NameResolver {
      * The proof data is the resource data portion from hsk_parse_namestate
      */
     private fun parseResourceRecordsFromProof(proofData: ByteArray): List<com.acktarius.hnsgo.Record> {
-        // The proof data is the resource data extracted from name state
-        // It should contain resource records in Handshake format
-        // For now, try parsing as resource records
-        return parseResourceRecords(listOf(proofData))
+        // Use ResourceDecoder to decode resource records from proof data
+        // This matches hnsd's hsk_resource_decode (resource.c:387-447)
+        return ResourceDecoder.decodeResource(proofData)
     }
     
     private fun parseResourceRecords(resourceRecords: List<ByteArray>): List<com.acktarius.hnsgo.Record> {
@@ -494,7 +446,7 @@ object NameResolver {
                             is ARecord -> {
                                 val ip = dnsRecord.address?.hostAddress
                                 if (ip != null) {
-                                    com.acktarius.hnsgo.Record(1, ip.toByteArray(Charsets.UTF_8))
+                                    com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_DNS_A, ip.toByteArray(Charsets.UTF_8))
                                 } else {
                                     null
                                 }
@@ -779,6 +731,18 @@ object NameResolver {
         return cbor.EncodeToBytes()
     }
     
+    /**
+     * Parse cached Handshake records from CBOR format
+     * 
+     * Handshake record types:
+     * - 0: HSK_NS - Nameserver record
+     * - 1: HSK_GLUE4 - IPv4 glue record
+     * - 2: HSK_GLUE6 - IPv6 glue record
+     * - 5: HSK_DS - DS record
+     * - 6: HSK_TEXT - TXT record
+     * 
+     * Returns Handshake records (not DNS records) - these will be converted to DNS format later
+     */
     private fun parseRecords(proof: ByteArray): List<com.acktarius.hnsgo.Record> {
         val cbor = CBORObject.DecodeFromBytes(proof)
         val records = mutableListOf<com.acktarius.hnsgo.Record>()
@@ -791,14 +755,20 @@ object NameResolver {
                     val r = dataArray[i]
                     val type = r["type"]?.AsInt32() ?: continue
                     val dataBytes = r["data"]?.GetByteString() ?: continue
+                    // Parse all Handshake record types (0=NS, 1=GLUE4, 2=GLUE6, 5=DS, 6=TXT)
                     when (type) {
-                        1 -> records.add(com.acktarius.hnsgo.Record(1, dataBytes))
-                        5 -> records.add(com.acktarius.hnsgo.Record(5, dataBytes))
-                        52 -> records.add(com.acktarius.hnsgo.Record(52, dataBytes))
+                        com.acktarius.hnsgo.Config.HSK_DS -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_DS, dataBytes))
+                        com.acktarius.hnsgo.Config.HSK_NS -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_NS, dataBytes))
+                        com.acktarius.hnsgo.Config.HSK_GLUE4 -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_GLUE4, dataBytes))
+                        com.acktarius.hnsgo.Config.HSK_GLUE6 -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_GLUE6, dataBytes))
+                        com.acktarius.hnsgo.Config.HSK_TEXT -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_TEXT, dataBytes))
+                        else -> {
+                            android.util.Log.w("HNSGo", "NameResolver: Unknown cached record type: $type")
+                        }
                     }
                 }
             } catch (e: Exception) {
-                // Not an array, skip
+                android.util.Log.e("HNSGo", "NameResolver: Error parsing cached records", e)
             }
         }
         return records

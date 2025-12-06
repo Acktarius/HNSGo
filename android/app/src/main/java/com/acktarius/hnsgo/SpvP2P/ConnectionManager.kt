@@ -3,11 +3,14 @@ package com.acktarius.hnsgo.spvp2p
 import android.util.Log
 import com.acktarius.hnsgo.Config
 import com.acktarius.hnsgo.DnsSeedDiscovery
+import com.acktarius.hnsgo.FullNodePeers
 import com.acktarius.hnsgo.HardcodedPeers
 import com.acktarius.hnsgo.Header
 import com.acktarius.hnsgo.P2PMessage
 import com.acktarius.hnsgo.PeerErrorTracker
 import com.acktarius.hnsgo.PeerDiscovery
+import com.acktarius.hnsgo.SpvClient
+import com.acktarius.hnsgo.spvclient.NameResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
@@ -45,16 +48,13 @@ internal object ConnectionManager {
         this.dataDir = dataDir
         HardcodedPeers.init(dataDir)
         PeerErrorTracker.init(dataDir)
+        FullNodePeers.init(dataDir)
     }
     
     suspend fun discoverPeers(): List<String> = withContext(Dispatchers.IO) {
         val allPeers = mutableSetOf<String>()
         
         val verifiedPeers = HardcodedPeers.loadPeers()
-        
-        if (verifiedPeers.isNotEmpty()) {
-            HardcodedPeers.verifyAllPeers()
-        }
         
         Log.d("HNSGo", "ConnectionManager: Starting peer discovery - querying DNS seeds first")
         val dnsPeers = try {
@@ -176,12 +176,20 @@ internal object ConnectionManager {
             
             Log.d("HNSGo", "ConnectionManager: Starting handshake for header sync to $host:$port")
             protocolHandler.sendVersion(output, host, port, startHeight, messageHandler)
-            val (handshakeSuccess, extractedPeerHeight) = protocolHandler.handshake(input, output, messageHandler)
+            val (handshakeSuccess, extractedPeerHeight, peerServices) = protocolHandler.handshake(input, output, messageHandler)
             peerHeight = extractedPeerHeight // Store for use in exception handlers
             
             // Log peer height even if handshake fails (useful for network height tracking)
             if (peerHeight != null) {
                 Log.d("HNSGo", "ConnectionManager: Peer $host:$port reported height: $peerHeight")
+            }
+            
+            // Record verified full nodes (peers with NETWORK service flag) even during header sync
+            // This helps prioritize them for future name queries
+            if (handshakeSuccess && peerServices != null && (peerServices and 1L) != 0L) {
+                val peerAddress = "$host:$port"
+                Log.d("HNSGo", "ConnectionManager: Peer $peerAddress has NETWORK service flag (services: $peerServices), recording as verified full node")
+                FullNodePeers.recordVerifiedFullNode(peerAddress)
             }
             
             if (!handshakeSuccess) {
@@ -313,59 +321,107 @@ internal object ConnectionManager {
             
             Log.d("HNSGo", "ConnectionManager: Starting handshake for name query to $host:$port (height: $chainHeight)")
             protocolHandler.sendVersion(output, host, port, chainHeight, messageHandler)
-            val (handshakeSuccess, peerHeight) = protocolHandler.handshake(input, output, messageHandler)
+            val (handshakeSuccess, peerHeight, peerServices) = protocolHandler.handshake(input, output, messageHandler)
             if (!handshakeSuccess) {
                 Log.w("HNSGo", "ConnectionManager: Handshake failed for name query to $host:$port (peer may not support name queries or closed connection)")
                 return@withContext NameQueryResult.Error
             }
             
-            Log.d("HNSGo", "ConnectionManager: Handshake successful with $host:$port (peer height: $peerHeight)")
+            Log.d("HNSGo", "ConnectionManager: Handshake successful with $host:$port (peer height: $peerHeight, services: $peerServices)")
             
-            // CRITICAL: Adjust root based on peer height to ensure peer has it
-            // Calculate the peer's safe root (same logic as hnsd's hsk_chain_safe_root)
-            // Use the peer's height to calculate their safe root, ensuring they have it
-            val adjustedRoot = if (headerChain != null && headerChain.isNotEmpty() && peerHeight != null) {
-                // Calculate safe root based on peer's height (matching hnsd chain.c:180-209)
-                val interval = Config.TREE_INTERVAL
-                val firstHeaderHeight = chainHeight - headerChain.size + 1
-                // Use peer's height to calculate their safe root
-                var mod = peerHeight % interval
-                if (mod >= 12) mod = 0
-                val peerSafeHeight = peerHeight - mod
-                // Ensure we have this header in our chain
-                val safeHeight = if (peerSafeHeight >= firstHeaderHeight && peerSafeHeight <= chainHeight) {
-                    peerSafeHeight
-                } else {
-                    // If peer's safe height is beyond our chain, use the closest we have
-                    minOf(peerSafeHeight, chainHeight)
-                }
-                
-                // Get root from header at safeHeight
-                if (safeHeight >= firstHeaderHeight && safeHeight <= chainHeight) {
-                    val index = safeHeight - firstHeaderHeight
-                    if (index >= 0 && index < headerChain.size) {
-                        val adjustedRootBytes = headerChain[index].nameRoot
-                        val adjustedRootHex = adjustedRootBytes.joinToString("") { "%02x".format(it) }
-                        Log.d("HNSGo", "ConnectionManager: Adjusted root based on peer height $peerHeight -> using root from height $safeHeight: $adjustedRootHex")
-                        adjustedRootBytes
-                    } else {
-                        Log.w("HNSGo", "ConnectionManager: Index out of bounds for adjusted root, using fallback root")
-                        nameRoot
-                    }
-                } else {
-                    Log.w("HNSGo", "ConnectionManager: Safe height $safeHeight outside range, using fallback root")
-                    nameRoot
-                }
-            } else {
-                // No header chain or peer height, use fallback root
-                Log.d("HNSGo", "ConnectionManager: No header chain or peer height, using fallback root")
-                nameRoot
+            // CRITICAL: Validate heights - peer must be within 2 blocks of our height
+            // and our height must be within 2 blocks of network height
+            if (peerHeight == null) {
+                Log.w("HNSGo", "ConnectionManager: Peer did not report height, rejecting")
+                return@withContext NameQueryResult.Error
             }
             
+            // CRITICAL: Check if peer has NETWORK service flag (hsd only uses peers with services & NETWORK for name queries)
+            // NETWORK = 1 << 0 = 1 (bit 0 set indicates full node that can serve name proofs)
+            // SPV nodes don't have this flag, so they can't serve name proofs
+            if (peerServices == null || (peerServices and 1L) == 0L) {
+                Log.w("HNSGo", "ConnectionManager: Peer does not have NETWORK service flag (services: $peerServices), rejecting for name query")
+                return@withContext NameQueryResult.Error
+            }
+            Log.d("HNSGo", "ConnectionManager: Peer has NETWORK service flag (services: $peerServices), can serve name proofs")
+            
+            // Record this peer as a verified full node (has NETWORK flag)
+            // This dynamically builds our list of verified full nodes
+            val peerAddress = "$host:$port"
+            FullNodePeers.recordVerifiedFullNode(peerAddress)
+            
+            // Check 1: Our local height should be within 2 blocks of network height
+            val networkHeight = SpvClient.getNetworkHeight()
+            if (networkHeight != null) {
+                val ourHeightDiff = kotlin.math.abs(chainHeight - networkHeight)
+                if (ourHeightDiff > 2) {
+                    Log.w("HNSGo", "ConnectionManager: Our height ($chainHeight) is $ourHeightDiff blocks away from network height ($networkHeight), rejecting peer")
+                    return@withContext NameQueryResult.Error
+                }
+                Log.d("HNSGo", "ConnectionManager: Our height ($chainHeight) is within 2 blocks of network height ($networkHeight)")
+            } else {
+                Log.d("HNSGo", "ConnectionManager: Network height not available, skipping network height validation")
+            }
+            
+            // Check 2: Peer height should be within 2 blocks of our local height
+            val peerHeightDiff = kotlin.math.abs(peerHeight - chainHeight)
+            if (peerHeightDiff > 2) {
+                Log.w("HNSGo", "ConnectionManager: Peer height ($peerHeight) is $peerHeightDiff blocks away from our height ($chainHeight), rejecting peer")
+                return@withContext NameQueryResult.Error
+            }
+            Log.d("HNSGo", "ConnectionManager: Peer height ($peerHeight) is within 2 blocks of our height ($chainHeight)")
+            
+            // CRITICAL: Match hnsd's exact handshake flow (pool.c:1351-1363)
+            // hnsd sends sendheaders -> getaddr -> getheaders after handshake
+            // This ensures the peer knows we're ready and follows the expected protocol
+            protocolHandler.sendSendHeaders(output, messageHandler)
+            Log.d("HNSGo", "ConnectionManager: Sent sendheaders (matching hnsd protocol)")
+            
+            // Send getaddr (matching hnsd pool.c:1357)
+            protocolHandler.sendGetAddr(output, messageHandler)
+            Log.d("HNSGo", "ConnectionManager: Sent getaddr (matching hnsd protocol)")
+            
+            // Send getheaders (matching hnsd pool.c:1363)
+            // For name queries, we don't need a full locator - just send empty (uses genesis)
+            // This matches hnsd's handshake flow even though we don't need the headers
+            protocolHandler.sendGetHeaders(output, emptyList(), messageHandler)
+            Log.d("HNSGo", "ConnectionManager: Sent getheaders (matching hnsd protocol)")
+            
+            // Consume any responses to getaddr/getheaders before sending getproof
+            // Peers may send addr or headers messages, and we should read them to avoid blocking
+            var consumedMessages = 0
+            val maxConsumeAttempts = 5
+            while (consumedMessages < maxConsumeAttempts) {
+                val message = withTimeoutOrNull(100) {
+                    messageHandler.receiveMessage(input)
+                }
+                if (message == null) {
+                    break  // No more messages or timeout
+                }
+                consumedMessages++
+                Log.d("HNSGo", "ConnectionManager: Consumed message: ${message.command} (before getproof)")
+                // Don't process these messages, just consume them to avoid blocking
+            }
+            if (consumedMessages > 0) {
+                Log.d("HNSGo", "ConnectionManager: Consumed $consumedMessages messages before sending getproof")
+            }
+            
+            // CRITICAL: Use actual chain root (from hsk_chain_safe_root) + name_hash
+            // hnsd logs confirm: root=chain_root, name_hash=name_hash (DIFFERENT values!)
+            // hnsd pool.c:521: const uint8_t *root = hsk_chain_safe_root(&pool->chain);
+            // hnsd pool.c:565: return hsk_peer_send_getproof(peer, req->hash, root);
+            // Wire format: root[32] (chain root) + key[32] (name_hash)
+            // From hnsd logs: root=d9b6650a... name_hash=3739aae9... (different!)
+            val rootToUse = nameRoot  // Use actual chain root from hsk_chain_safe_root
+            
+            val rootHex = rootToUse.joinToString("") { "%02x".format(it) }
             val nameHashHex = nameHash.joinToString("") { "%02x".format(it) }
-            val adjustedRootHex = adjustedRoot.joinToString("") { "%02x".format(it) }
-            Log.d("HNSGo", "ConnectionManager: Sending getproof for name hash: $nameHashHex (adjustedRoot: $adjustedRootHex, peer height: $peerHeight, our height: $chainHeight)")
-            protocolHandler.sendGetProof(output, nameHash, adjustedRoot, messageHandler)
+            Log.w("HNSGo", "ConnectionManager: Using chain root + name_hash (matching hnsd)")
+            Log.d("HNSGo", "ConnectionManager: Sending getproof to $host:$port")
+            Log.d("HNSGo", "ConnectionManager:   Root (chain safe root): $rootHex")
+            Log.d("HNSGo", "ConnectionManager:   Key (name_hash): $nameHashHex")
+            
+            protocolHandler.sendGetProof(output, nameHash, rootToUse, messageHandler)
             
             var proofMessage: P2PMessage? = null
             var attempts = 0
@@ -386,10 +442,7 @@ internal object ConnectionManager {
                         break
                     }
                     "notfound" -> {
-                        // Log full notfound response for debugging
-                        val payloadHex = message.payload.joinToString("") { "%02x".format(it) }
-                        val payloadSize = message.payload.size
-                        Log.d("HNSGo", "ConnectionManager: Domain not found (valid protocol response) - payload size: $payloadSize, payload: $payloadHex")
+                        Log.w("HNSGo", "ConnectionManager: Peer returned notfound")
                         return@withContext NameQueryResult.NotFound
                     }
                     "ping" -> {
@@ -413,6 +466,10 @@ internal object ConnectionManager {
                     "addr" -> {
                         // Peer may send addr messages - just continue waiting
                         Log.d("HNSGo", "ConnectionManager: Received addr message, continuing to wait for proof")
+                    }
+                    "inv" -> {
+                        // Peer may send inv (inventory) messages - just continue waiting
+                        Log.d("HNSGo", "ConnectionManager: Received inv message, continuing to wait for proof")
                     }
                     else -> {
                         Log.d("HNSGo", "ConnectionManager: Received unexpected message: ${message.command}, continuing to wait for proof")

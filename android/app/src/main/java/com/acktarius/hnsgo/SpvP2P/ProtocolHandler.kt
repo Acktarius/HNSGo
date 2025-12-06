@@ -16,6 +16,8 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.SocketException
 import java.net.SocketTimeoutException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Handles P2P protocol operations (handshake, sending commands)
@@ -27,13 +29,15 @@ internal object ProtocolHandler {
         input: InputStream,
         output: OutputStream,
         messageHandler: MessageHandler
-    ): Pair<Boolean, Int?> {
+    ): Triple<Boolean, Int?, Long?> {
         var versionReceived = false
         var verackReceived = false
         var ourVerackSent = false
         var peerHeight: Int? = null
+        var peerServices: Long? = null
         
-        val handshakeTimeout = 10000L
+        // hsd uses 5 seconds, hnsd uses 10 seconds - use 5 seconds to match full nodes
+        val handshakeTimeout = 5000L
         val startTime = System.currentTimeMillis()
         var attempts = 0
         val maxAttempts = 20
@@ -42,7 +46,7 @@ internal object ProtocolHandler {
             val elapsed = System.currentTimeMillis() - startTime
             if (elapsed > handshakeTimeout) {
                 Log.w("HNSGo", "ProtocolHandler: Handshake timeout after ${elapsed}ms")
-                return Pair(false, null)
+                return Triple(false, null, null)
             }
             
             try {
@@ -52,7 +56,7 @@ internal object ProtocolHandler {
                     if (attempts == 0) {
                         Log.w("HNSGo", "ProtocolHandler: Peer closed connection immediately")
                     }
-                    return Pair(false, null)
+                    return Triple(false, null, null)
                 }
                 
                 Log.d("HNSGo", "ProtocolHandler: Received message: ${message.command}")
@@ -62,7 +66,8 @@ internal object ProtocolHandler {
                         try {
                             val versionData = messageHandler.parseVersionMessage(message.payload)
                             peerHeight = versionData.height
-                            Log.d("HNSGo", "ProtocolHandler: Peer version: ${versionData.version}, height: ${versionData.height}")
+                            peerServices = versionData.services
+                            Log.d("HNSGo", "ProtocolHandler: Peer version: ${versionData.version}, height: ${versionData.height}, services: ${versionData.services} (0x${versionData.services.toString(16)})")
                             versionReceived = true
                             if (!ourVerackSent) {
                                 messageHandler.sendMessage(output, "verack", byteArrayOf())
@@ -80,8 +85,26 @@ internal object ProtocolHandler {
                     "verack" -> {
                         verackReceived = true
                     }
+                    "ping" -> {
+                        // Handle ping during handshake (matching hnsd's hsk_peer_handle_ping)
+                        // Respond with pong but continue handshake
+                        try {
+                            if (message.payload.size >= 8) {
+                                val nonce = ByteBuffer.wrap(message.payload.sliceArray(0..7))
+                                    .order(ByteOrder.LITTLE_ENDIAN).long
+                                Log.d("HNSGo", "ProtocolHandler: Received ping (nonce=$nonce) during handshake, sending pong")
+                                val pongPayload = ByteArray(8).apply {
+                                    ByteBuffer.wrap(this).order(ByteOrder.LITTLE_ENDIAN).putLong(nonce)
+                                }
+                                messageHandler.sendMessage(output, "pong", pongPayload)
+                            }
+                        } catch (e: Exception) {
+                            Log.w("HNSGo", "ProtocolHandler: Error handling ping during handshake", e)
+                        }
+                        // Continue handshake - don't break
+                    }
                     else -> {
-                        Log.d("HNSGo", "ProtocolHandler: Received ${message.command} during handshake")
+                        Log.d("HNSGo", "ProtocolHandler: Received ${message.command} during handshake (ignoring, waiting for version/verack)")
                     }
                 }
             } catch (e: SocketTimeoutException) {
@@ -89,14 +112,14 @@ internal object ProtocolHandler {
             } catch (e: SocketException) {
                 if (e.message?.contains("Connection reset") == true || e.message?.contains("reset") == true) {
                     Log.w("HNSGo", "ProtocolHandler: Connection reset by peer")
-                    return Pair(false, null)
+                    return Triple(false, null, null)
                 } else {
                     Log.e("HNSGo", "ProtocolHandler: Socket error", e)
-                    return Pair(false, null)
+                    return Triple(false, null, null)
                 }
             } catch (e: Exception) {
                 Log.e("HNSGo", "ProtocolHandler: Error during handshake", e)
-                return Pair(false, null)
+                return Triple(false, null, null)
             }
             attempts++
         }
@@ -107,7 +130,7 @@ internal object ProtocolHandler {
         } else {
             Log.w("HNSGo", "ProtocolHandler: Handshake incomplete")
         }
-        return Pair(success, peerHeight)
+        return Triple(success, peerHeight, peerServices)
     }
     
     fun sendVersion(
@@ -220,10 +243,17 @@ internal object ProtocolHandler {
         require(nameHash.size == 32) { "Name hash must be 32 bytes, got ${nameHash.size}" }
         require(nameRoot.size == 32) { "Tree root must be 32 bytes, got ${nameRoot.size}" }
         
-        // EXACT MATCH to hnsd msg.c:289-293 (hsk_getproof_msg_write)
-        // hnsd writes: root[32] then key[32] (matching struct order)
+        // EXACT MATCH to hnsd msg.c:hsk_getproof_msg_write (lines 289-293)
+        // hnsd struct definition (hsk_getproof_msg_t):
+        //   uint8_t cmd;
+        //   uint8_t root[32];  // First field after cmd
+        //   uint8_t key[32];   // Second field after cmd
+        // hsk_getproof_msg_write() serialization order (CONFIRMED):
+        //   write_bytes(data, msg->root, 32);  // root first
+        //   write_bytes(data, msg->key, 32);    // key second
+        // Wire format: root[32] + key[32] = 64 bytes total
         val payload = ByteArray(64).apply {
-            System.arraycopy(nameRoot, 0, this, 0, 32)  // root first (offset 0-31)
+            System.arraycopy(nameRoot, 0, this, 0, 32)  // root first (offset 0-31) - matches struct field order
             System.arraycopy(nameHash, 0, this, 32, 32)  // key second (offset 32-63)
         }
         
@@ -293,6 +323,13 @@ internal object ProtocolHandler {
             // Handle pong messages (response to our ping, if any)
             if (message.command == "pong") {
                 Log.d("HNSGo", "ProtocolHandler: Received pong, continuing to wait for headers")
+                continue // Continue waiting for headers
+            }
+            
+            // Handle inv (inventory) messages (full nodes send these to announce new blocks/txs)
+            // We're SPV, so we ignore them and continue waiting for headers
+            if (message.command == "inv") {
+                Log.d("HNSGo", "ProtocolHandler: Received inv (inventory) message, ignoring (SPV doesn't need inventory), continuing to wait for headers")
                 continue // Continue waiting for headers
             }
             

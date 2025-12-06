@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.xbill.DNS.AAAARecord
 import org.xbill.DNS.ARecord
+import org.xbill.DNS.CNAMERecord
 import org.xbill.DNS.DClass
 import org.xbill.DNS.Flags
 import org.xbill.DNS.Message
@@ -61,16 +62,17 @@ object RecursiveResolver {
         val isTLDQuery = (name.lowercase().trimEnd('.') == tld.lowercase())
         
         // Step 1: Query blockchain for TLD resource records
-        val blockchainRecords = SpvClient.resolve(name) // This already extracts TLD internally
-        if (blockchainRecords == null || blockchainRecords.isEmpty()) {
+        // Note: SpvClient.resolve() already returns DNS records (converted by NameResolver)
+        val dnsRecords = SpvClient.resolve(name) // This already extracts TLD internally and converts to DNS
+        if (dnsRecords == null || dnsRecords.isEmpty()) {
             Log.d("HNSGo", "RecursiveResolver: No blockchain records found for '$name'")
             return@withContext null
         }
         
-        // Separate record types
-        val nsRecords: List<com.acktarius.hnsgo.Record> = blockchainRecords.filter { it.type == 2 } // NS records
-        val glueARecords: List<com.acktarius.hnsgo.Record> = blockchainRecords.filter { it.type == 1 } // A records (GLUE)
-        val glueAAAARecords: List<com.acktarius.hnsgo.Record> = blockchainRecords.filter { it.type == 28 } // AAAA records (GLUE)
+        // Separate record types (using DNS record types: 2=NS, 1=A, 28=AAAA)
+        val nsRecords: List<com.acktarius.hnsgo.Record> = dnsRecords.filter { it.type == 2 } // NS records
+        val glueARecords: List<com.acktarius.hnsgo.Record> = dnsRecords.filter { it.type == 1 } // A records (GLUE)
+        val glueAAAARecords: List<com.acktarius.hnsgo.Record> = dnsRecords.filter { it.type == 28 } // AAAA records (GLUE)
         
         // If this is a TLD query, return NS + GLUE records
         if (isTLDQuery) {
@@ -122,46 +124,75 @@ object RecursiveResolver {
             addRecord(DNSRecord.newRecord(queryName, queryType, DClass.IN), Section.QUESTION)
         }
         
-        // Add NS records to AUTHORITY section
+        // Add NS records to AUTHORITY section (TTL: 6 hours, matching hnsd)
+        val ttl = Config.DNS_CACHE_TTL_SECONDS.toLong()
         nsRecords.forEach { rec ->
             val nameserver = String(rec.data, Charsets.UTF_8).trim()
             val nsName = Name(nameserver, Name.root)
-            response.addRecord(NSRecord(queryName, DClass.IN, 3600, nsName), Section.AUTHORITY)
+            response.addRecord(NSRecord(queryName, DClass.IN, ttl, nsName), Section.AUTHORITY)
             Log.d("HNSGo", "RecursiveResolver: Added NS record: $nameserver")
         }
         
         // Add GLUE records (A/AAAA) to ADDITIONAL section
-        // Match GLUE records to NS records (simplified - assumes first NS gets first GLUE)
-        var glueAIndex = 0
-        var glueAAAAIndex = 0
-        
+        // Match GLUE records to NS records by name (matching hnsd's hsk_resource_to_glue)
+        // GLUE record format: "name\0ip" (name + null byte + IP string)
         nsRecords.forEach { nsRec ->
             val nameserver = String(nsRec.data, Charsets.UTF_8).trim()
             val nsName = Name(nameserver, Name.root)
             
-            // Add A record if available
-            if (glueAIndex < glueARecords.size) {
-                val glueA = glueARecords[glueAIndex]
-                val ip = String(glueA.data, Charsets.UTF_8).trim()
-                try {
-                    response.addRecord(ARecord(nsName, DClass.IN, 3600, InetAddress.getByName(ip)), Section.ADDITIONAL)
-                    Log.d("HNSGo", "RecursiveResolver: Added GLUE A: $ip for $nameserver")
-                    glueAIndex++
-                } catch (e: Exception) {
-                    Log.e("HNSGo", "RecursiveResolver: Error parsing GLUE A: $ip", e)
+            // Find matching GLUE4 record by name
+            val matchingGlueA = glueARecords.find { glueRec ->
+                val glueData = String(glueRec.data, Charsets.UTF_8)
+                val nullIndex = glueData.indexOf('\u0000')
+                if (nullIndex > 0) {
+                    val glueName = glueData.substring(0, nullIndex).trim()
+                    glueName.equals(nameserver, ignoreCase = true)
+                } else {
+                    false
                 }
             }
             
-            // Add AAAA record if available
-            if (glueAAAAIndex < glueAAAARecords.size) {
-                val glueAAAA = glueAAAARecords[glueAAAAIndex]
-                val ip = String(glueAAAA.data, Charsets.UTF_8).trim()
-                try {
-                    response.addRecord(AAAARecord(nsName, DClass.IN, 3600, InetAddress.getByName(ip)), Section.ADDITIONAL)
-                    Log.d("HNSGo", "RecursiveResolver: Added GLUE AAAA: $ip for $nameserver")
-                    glueAAAAIndex++
-                } catch (e: Exception) {
-                    Log.e("HNSGo", "RecursiveResolver: Error parsing GLUE AAAA: $ip", e)
+            if (matchingGlueA != null) {
+                val glueData = String(matchingGlueA.data, Charsets.UTF_8)
+                val nullIndex = glueData.indexOf('\u0000')
+                if (nullIndex > 0) {
+                    val glueName = glueData.substring(0, nullIndex).trim()
+                    val ip = glueData.substring(nullIndex + 1).trim()
+                    try {
+                        response.addRecord(ARecord(nsName, DClass.IN, ttl, InetAddress.getByName(ip)), Section.ADDITIONAL)
+                        Log.d("HNSGo", "RecursiveResolver: Added GLUE A: $ip for $nameserver (matched by name: $glueName)")
+                    } catch (e: Exception) {
+                        Log.e("HNSGo", "RecursiveResolver: Error parsing GLUE A: $ip", e)
+                    }
+                }
+            }
+            
+            // Find matching GLUE6 record by name (only if no A record found)
+            if (matchingGlueA == null) {
+                val matchingGlueAAAA = glueAAAARecords.find { glueRec ->
+                    val glueData = String(glueRec.data, Charsets.UTF_8)
+                    val nullIndex = glueData.indexOf('\u0000')
+                    if (nullIndex > 0) {
+                        val glueName = glueData.substring(0, nullIndex).trim()
+                        glueName.equals(nameserver, ignoreCase = true)
+                    } else {
+                        false
+                    }
+                }
+                
+                if (matchingGlueAAAA != null) {
+                    val glueData = String(matchingGlueAAAA.data, Charsets.UTF_8)
+                    val nullIndex = glueData.indexOf('\u0000')
+                    if (nullIndex > 0) {
+                        val glueName = glueData.substring(0, nullIndex).trim()
+                        val ip = glueData.substring(nullIndex + 1).trim()
+                        try {
+                            response.addRecord(AAAARecord(nsName, DClass.IN, ttl, InetAddress.getByName(ip)), Section.ADDITIONAL)
+                            Log.d("HNSGo", "RecursiveResolver: Added GLUE AAAA: $ip for $nameserver (matched by name: $glueName)")
+                        } catch (e: Exception) {
+                            Log.e("HNSGo", "RecursiveResolver: Error parsing GLUE AAAA: $ip", e)
+                        }
+                    }
                 }
             }
         }
@@ -192,18 +223,35 @@ object RecursiveResolver {
         }
         
         // Build nameserver IP list from GLUE records
+        // GLUE record format: "name\0ip" (name + null byte + IP string)
         val nameserverIPs = mutableListOf<Pair<String, Boolean>>() // (IP, isIPv6)
         
         // Add IPv4 addresses
         glueARecords.forEach { rec ->
-            val ip = String(rec.data, Charsets.UTF_8).trim()
-            nameserverIPs.add(Pair(ip, false))
+            val glueData = String(rec.data, Charsets.UTF_8)
+            val nullIndex = glueData.indexOf('\u0000')
+            if (nullIndex > 0) {
+                val ip = glueData.substring(nullIndex + 1).trim()
+                nameserverIPs.add(Pair(ip, false))
+            } else {
+                // Fallback: old format (just IP)
+                val ip = glueData.trim()
+                nameserverIPs.add(Pair(ip, false))
+            }
         }
         
         // Add IPv6 addresses
         glueAAAARecords.forEach { rec ->
-            val ip = String(rec.data, Charsets.UTF_8).trim()
-            nameserverIPs.add(Pair(ip, true))
+            val glueData = String(rec.data, Charsets.UTF_8)
+            val nullIndex = glueData.indexOf('\u0000')
+            if (nullIndex > 0) {
+                val ip = glueData.substring(nullIndex + 1).trim()
+                nameserverIPs.add(Pair(ip, true))
+            } else {
+                // Fallback: old format (just IP)
+                val ip = glueData.trim()
+                nameserverIPs.add(Pair(ip, true))
+            }
         }
         
         if (nameserverIPs.isEmpty()) {
@@ -220,7 +268,11 @@ object RecursiveResolver {
                 if (answer != null) {
                     val answers = answer.getSection(Section.ANSWER)
                     if (answers.isNotEmpty()) {
-                        Log.d("HNSGo", "RecursiveResolver: Got answer from $ip: ${answers.size} records")
+                        // Log record types in answer section
+                        val recordTypes = answers.map { record ->
+                            "${Type.string(record.type)}(${record.rdataToString()})"
+                        }.joinToString(", ")
+                        Log.d("HNSGo", "RecursiveResolver: Got answer from $ip: ${answers.size} records [${recordTypes}]")
                         return@withContext answer
                     }
                 }

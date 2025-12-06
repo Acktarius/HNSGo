@@ -119,13 +119,17 @@ object SpvClient {
             firstInMemoryHeight = calculatedFirstInMemory
         }
         
+        // Pass known network height to prevent accepting headers ahead of network (matching hnsd behavior)
+        // hnsd/hsd reject headers that are ahead of the known network height
         val networkHeight = HeaderSync.syncHeaders(
             headerChain = headerChain,
             getChainHeight = { chainHeight },
             firstInMemoryHeight = firstInMemoryHeight,
             maxInMemoryHeaders = MAX_IN_MEMORY_HEADERS,
-            onHeaderAdded = { _ ->
-                chainHeight++
+            onHeaderAdded = { _, actualHeight ->
+                // CRITICAL: Set chainHeight to the actual height of the header, not just increment
+                // This ensures we report the correct height to peers (not ahead of network)
+                chainHeight = actualHeight
             },
             saveHeaders = suspend {
                 // Calculate current firstInMemoryHeight dynamically (may have changed due to trimming)
@@ -138,11 +142,32 @@ object SpvClient {
                 }
                 HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, currentFirstInMemory)
                 Unit
-            }
+            },
+            knownNetworkHeight = lastNetworkHeight  // Pass known network height to reject headers ahead of it (matching hnsd behavior)
         )
         
         if (networkHeight != null) {
             lastNetworkHeight = networkHeight
+            // CRITICAL: Cap chainHeight to never exceed network height
+            // This prevents us from reporting a height ahead of the network (which causes peer rejections)
+            if (chainHeight > networkHeight) {
+                android.util.Log.w("HNSGo", "SpvClient: Capping chainHeight from $chainHeight to network height $networkHeight (we were ahead of network)")
+                chainHeight = networkHeight
+                // Also need to remove any headers that are ahead of network height
+                synchronized(headerChain) {
+                    val firstHeaderHeight = chainHeight - headerChain.size + 1
+                    val headersToKeep = headerChain.filterIndexed { index, _ ->
+                        val headerHeight = firstHeaderHeight + index
+                        headerHeight <= networkHeight
+                    }
+                    if (headersToKeep.size < headerChain.size) {
+                        val removed = headerChain.size - headersToKeep.size
+                        android.util.Log.w("HNSGo", "SpvClient: Removing $removed headers that are ahead of network height")
+                        headerChain.clear()
+                        headerChain.addAll(headersToKeep)
+                    }
+                }
+            }
         }
         
         networkHeight
@@ -227,9 +252,7 @@ object SpvClient {
         NameResolver.resolve(
             name = name,
             headerChain = headerChain,
-            chainHeight = chainHeight,
-            resolverHost = resolverHost,
-            resolverPort = resolverPort
+            chainHeight = chainHeight
         )
     }
 }

@@ -74,7 +74,7 @@ object Config {
     const val DHT_PEER_EXPIRY_SECONDS = 3600L  // Peer expiration time (1 hour)
     
     // Cache Configuration
-    const val DNS_CACHE_TTL_SECONDS = 3600  // 1 hour default TTL
+    const val DNS_CACHE_TTL_SECONDS = 21600  // 6 hours default TTL (matching hnsd authoritative server cache)
     
     // Peer Discovery Configuration
     // DNS Seeds (Primary method for peer discovery)
@@ -106,6 +106,23 @@ object Config {
     const val DNS_STD_EDNS = 1280  // HSK_DNS_STD_EDNS (EDNS0 buffer size)
     const val DNS_MAX_EDNS = 4096  // HSK_DNS_MAX_EDNS
     
+    // Handshake Resource Record Types (from hnsd resource.h)
+    const val HSK_DS = 0  // DS record
+    const val HSK_NS = 1  // NS record
+    const val HSK_GLUE4 = 2  // GLUE4 record (IPv4 glue)
+    const val HSK_GLUE6 = 3  // GLUE6 record (IPv6 glue)
+    const val HSK_SYNTH4 = 4  // SYNTH4 record (synthetic IPv4)
+    const val HSK_SYNTH6 = 5  // SYNTH6 record (synthetic IPv6)
+    const val HSK_TEXT = 6  // TEXT record
+    
+    // DNS Record Types (from hnsd dns.h)
+    const val HSK_DNS_A = 1  // IPv4 address record
+    const val HSK_DNS_AAAA = 28  // IPv6 address record
+    const val HSK_DNS_NS = 2  // Nameserver record
+    const val HSK_DNS_DS = 43  // DNSSEC delegation signer
+    const val HSK_DNS_TXT = 16  // Text record
+    const val HSK_DNS_ANY = 255  // Any record type (for queries)
+    
     // DNS Response Codes (from hnsd dns.h)
     const val DNS_NOERROR = 0  // No Error
     const val DNS_FORMERR = 1  // Format Error
@@ -113,5 +130,18 @@ object Config {
     const val DNS_NXDOMAIN = 3  // Non-Existent Domain
     const val DNS_NOTIMP = 4  // Not Implemented
     const val DNS_REFUSED = 5  // Query Refused
+    
+    // Blacklisted TLDs (from hnsd ns.c:475-503)
+    // These TLDs are reserved for other naming systems and should return NXDOMAIN
+    val BLACKLISTED_TLDS = setOf(
+        "bit",    // Namecoin
+        "eth",    // ENS (Ethereum Name Service)
+        "exit",   // Tor
+        "gnu",    // GNUnet (GNS)
+        "i2p",    // Invisible Internet Project
+        "onion",  // Tor
+        "tor",    // OnioNS
+        "zkey"    // GNS
+    )
 }
 

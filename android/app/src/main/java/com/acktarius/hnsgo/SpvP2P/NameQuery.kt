@@ -2,7 +2,7 @@ package com.acktarius.hnsgo.spvp2p
 
 import android.util.Log
 import com.acktarius.hnsgo.Config
-import com.acktarius.hnsgo.HardcodedPeers
+import com.acktarius.hnsgo.FullNodePeers
 import com.acktarius.hnsgo.Header
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -35,21 +35,20 @@ internal object NameQuery {
         discoverPeers: suspend () -> List<String>,
         maxPeers: Int = Int.MAX_VALUE
     ): NameQueryResult = withContext(Dispatchers.IO) {
-        // Note: nameRoot should be from a height that peers have
-        // We pass chainHeight for version message, but the actual root used
-        // should be calculated to ensure peers have it
-        // For name queries, use persisted peers directly (fast) instead of full discovery (slow)
-        val peersToTry = try {
-            HardcodedPeers.getFallbackPeers()
-        } catch (e: Exception) {
-            Log.w("HNSGo", "NameQuery: Error loading persisted peers, using discovery", e)
-            discoverPeers()
-        }
+        // Load full node peer errors and proof counts
+        FullNodePeers.loadErrors()
+        val allFullNodePeers = FullNodePeers.getAllFullNodePeers()
+        val filteredPeers = FullNodePeers.filterExcluded(allFullNodePeers)
         
-        if (peersToTry.isEmpty()) {
-            Log.w("HNSGo", "NameQuery: No peers available for name query")
+        if (filteredPeers.isEmpty()) {
+            Log.w("HNSGo", "NameQuery: No full node peers available for name query")
             return@withContext NameQueryResult.Error
         }
+        
+        // Use hnsd's probabilistic selection algorithm
+        // This selects a peer based on name hash (deterministic for same name)
+        // with some randomization for load balancing
+        val peersToTry = FullNodePeers.selectPeersWithHnsdAlgorithm(nameHash, filteredPeers)
         
         // Limit peers if maxPeers is specified
         val peersToTryLimited = if (maxPeers < Int.MAX_VALUE) {
@@ -58,21 +57,13 @@ internal object NameQuery {
             }
         } else {
             peersToTry.also {
-                Log.d("HNSGo", "NameQuery: Trying all ${it.size} peers for name query")
+                Log.d("HNSGo", "NameQuery: Using hnsd selection algorithm, trying ${it.size} full node peers for name query")
             }
         }
         
         // Try each peer until we get a response
-        // Some peers may not support name queries (getproof) - they might only support header sync
-        // Also, some peers may have pruned data, so we try multiple peers even if one says "notfound"
+        // For full nodes, "notfound" is counted as an error because they should have the name tree
         var lastError: String? = null
-        var notFoundCount = 0
-        val maxNotFoundBeforeGivingUp = if (maxPeers < Int.MAX_VALUE) {
-            // When limiting peers, use a smaller threshold (e.g., 3 out of 5)
-            minOf(3, peersToTryLimited.size)
-        } else {
-            10  // Try at least 10 peers before concluding domain doesn't exist
-        }
         
         for ((index, peer) in peersToTryLimited.withIndex()) {
             val parts = peer.split(":")
@@ -91,41 +82,32 @@ internal object NameQuery {
             when (result) {
                 is NameQueryResult.Success -> {
                     Log.d("HNSGo", "NameQuery: Successfully queried name from $host:$port")
+                    // Record proof success (like hnsd's peer->proofs++)
+                    FullNodePeers.recordProofSuccess(peer)
                     return@withContext NameQueryResult.Success(result.records, result.proof)
                 }
                 is NameQueryResult.NotFound -> {
-                    notFoundCount++
-                    Log.d("HNSGo", "NameQuery: Domain not found from $host:$port (notfound count: $notFoundCount/$maxNotFoundBeforeGivingUp)")
-                    // If multiple peers say notfound, it's likely the domain doesn't exist
-                    if (notFoundCount >= maxNotFoundBeforeGivingUp) {
-                        Log.d("HNSGo", "NameQuery: Multiple peers ($notFoundCount) confirmed domain not found - domain likely doesn't exist")
-                        return@withContext NameQueryResult.NotFound
-                    }
-                    // Otherwise, try next peer (peer might have pruned data)
+                    // For full nodes, "notfound" is an error - they should have the name tree
+                    Log.w("HNSGo", "NameQuery: Full node $host:$port returned notfound - counting as error")
+                    FullNodePeers.recordError(peer)
+                    // Try next peer
                     continue
                 }
                 is NameQueryResult.Error -> {
                     lastError = "Connection or protocol error"
-                    Log.d("HNSGo", "NameQuery: Error querying $host:$port (trying next peer - some peers may not support name queries)")
-                    // Try next peer - some peers may not support name queries (getproof)
+                    Log.d("HNSGo", "NameQuery: Error querying $host:$port")
+                    // Record error and try next peer
+                    FullNodePeers.recordError(peer)
                     continue
                 }
             }
         }
         
-        Log.w("HNSGo", "NameQuery: Failed to query name from all ${peersToTryLimited.size} peers")
-        
-        // If we got "notfound" from multiple peers, that's a valid response (domain doesn't exist)
-        // Return NotFound instead of Error in this case
-        if (notFoundCount > 0) {
-            Log.d("HNSGo", "NameQuery: Got $notFoundCount 'notfound' responses - returning NotFound")
-            return@withContext NameQueryResult.NotFound
-        }
+        Log.w("HNSGo", "NameQuery: Failed to query name from all ${peersToTryLimited.size} full node peers")
         
         if (lastError != null) {
             Log.w("HNSGo", "NameQuery: Last error was: $lastError")
         }
-        // If all peers errored (no notfound responses), that's a real problem
         return@withContext NameQueryResult.Error
     }
 }
