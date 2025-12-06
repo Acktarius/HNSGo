@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Method
@@ -504,10 +505,33 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
                 
                 if (certChain.size > 1) {
                     val caCert = certChain[1] as java.security.cert.X509Certificate
-                    Log.d("HNSGo", "DoH: CA cert subject: ${caCert.subjectDN}")
-                    Log.d("HNSGo", "DoH: CA cert is self-signed: ${caCert.issuerDN == caCert.subjectDN}")
+                    Log.i("HNSGo", "DoH: CA cert subject: ${caCert.subjectDN}")
+                    Log.i("HNSGo", "DoH: CA cert is self-signed: ${caCert.issuerDN == caCert.subjectDN}")
+                    // Verify CA certificate has proper extensions
+                    try {
+                        val basicConstraints = caCert.getExtensionValue("2.5.29.19") // BasicConstraints OID
+                        val keyUsage = caCert.getExtensionValue("2.5.29.15") // KeyUsage OID
+                        Log.i("HNSGo", "DoH: CA cert has BasicConstraints: ${basicConstraints != null}")
+                        Log.i("HNSGo", "DoH: CA cert has KeyUsage: ${keyUsage != null}")
+                        
+                        // Verify CA cert in chain matches the one from CertHelper (for debugging)
+                        try {
+                            val expectedCA = CertHelper.getCACertificate()
+                            val caCertEncoded = caCert.encoded
+                            val expectedCAEncoded = expectedCA.encoded
+                            val matches = java.util.Arrays.equals(caCertEncoded, expectedCAEncoded)
+                            Log.i("HNSGo", "DoH: CA cert in chain matches CertHelper CA: $matches")
+                            if (!matches) {
+                                Log.w("HNSGo", "DoH: WARNING - CA cert in chain does NOT match CertHelper CA!")
+                            }
+                        } catch (e: Exception) {
+                            Log.w("HNSGo", "DoH: Could not compare CA certificates", e)
+                        }
+                    } catch (e: Exception) {
+                        Log.w("HNSGo", "DoH: Could not verify CA cert extensions", e)
+                    }
                 } else {
-                    Log.w("HNSGo", "DoH: WARNING - Certificate chain missing CA certificate!")
+                    Log.e("HNSGo", "DoH: WARNING - Certificate chain missing CA certificate!")
                 }
             } else {
                 Log.e("HNSGo", "DoH: ERROR - No certificate chain found in KeyStore!")
@@ -530,7 +554,7 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             val remoteAddr = session.remoteIpAddress
             val uri = session.uri
             val headers = session.headers
-            Log.d("HNSGo", "DoH: Connection from $remoteAddr, URI: $uri, Method: ${session.method}")
+            Log.i("HNSGo", "DoH: ✓ Connection received from $remoteAddr, URI: $uri, Method: ${session.method}")
             Log.d("HNSGo", "DoH: Headers: ${headers.keys.joinToString()}")
             if (session.method == Method.POST) {
                 Log.d("HNSGo", "DoH: POST Content-Type: ${headers["content-type"]}, Content-Length: ${headers["content-length"]}")
@@ -538,8 +562,13 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
                 Log.d("HNSGo", "DoH: GET Query string: ${session.queryParameterString}, Params: ${session.parms}")
             }
             
+            // Health check endpoint
+            if (session.uri == "/health" || session.uri == "/") {
+                return NanoHTTPD.newFixedLengthResponse(Status.OK, "text/plain", "HNS Go DoH Server is running")
+            }
+            
             if (session.uri != "/dns-query") {
-                return NanoHTTPD.newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
+                return NanoHTTPD.newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found. Use /dns-query for DNS queries or /health for health check.")
             }
 
             // Handle both GET and POST methods (RFC 8484)
@@ -698,9 +727,27 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
 
             Log.d("HNSGo", "DoH: Resolving $name (type ${Type.string(type)})")
 
-            // Try Handshake recursive resolution first
-            val response = runBlocking { 
-                RecursiveResolver.resolve(name, type)
+            // Quick check: if TLD is a common non-Handshake TLD, skip Handshake resolution
+            val tld = ResourceRecord.extractTLD(name)
+            val commonTLDs = setOf("com", "org", "net", "edu", "gov", "mil", "int", "io", "co", "uk", "de", "fr", "jp", "cn", "ru", "br", "au", "in", "it", "es", "nl", "se", "no", "dk", "fi", "pl", "cz", "gr", "ie", "pt", "be", "ch", "at", "nz", "za", "mx", "ar", "ca", "us")
+            
+            // If it's a common TLD, immediately fall back to regular DNS (much faster)
+            val isCommonTLD = commonTLDs.contains(tld.lowercase())
+            if (isCommonTLD) {
+                Log.i("HNSGo", "DoH: TLD '$tld' is a common non-Handshake TLD, skipping Handshake resolution for $name")
+                return forwardToDns(msg, name)
+            }
+
+            // Try Handshake recursive resolution first (with timeout to avoid hanging)
+            val response = try {
+                runBlocking { 
+                    withTimeoutOrNull(2000) { // 2 second timeout for Handshake resolution
+                        RecursiveResolver.resolve(name, type)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("HNSGo", "DoH: Handshake resolution failed or timed out for $name: ${e.message}")
+                null
             }
         
         // If recursive resolution succeeded, return the response
@@ -743,7 +790,22 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             
             val wireData = resp.toWire()
             Log.d("HNSGo", "DoH: Sending response (${wireData.size} bytes) for $name")
-            return NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())
+            
+            // Check if socket is still open before sending response
+            // Firefox may close the connection if it doesn't trust the certificate
+            try {
+                // Try to create response - if socket is closed, this might fail
+                val httpResponse = NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())
+                return httpResponse
+            } catch (e: java.net.SocketException) {
+                if (e.message?.contains("closed") == true || e.message?.contains("Socket is closed") == true) {
+                    Log.d("HNSGo", "DoH: Socket closed by client before sending response (likely certificate trust issue). " +
+                            "This is expected if Firefox doesn't trust the certificate.")
+                    // Re-throw to let NanoHTTPD handle it
+                    throw e
+                }
+                throw e
+            }
         }
         
         // Handshake resolution failed - could be:
@@ -785,17 +847,26 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         return try {
             val questions = query.getSection(Section.QUESTION)
             val domainName = name ?: (if (questions.isNotEmpty()) questions[0].name.toString() else "unknown")
-            // Check if TLD exists in Handshake (was found but nameserver queries failed)
             val tld = ResourceRecord.extractTLD(domainName)
-            val tldFound = runBlocking {
-                val records = SpvClient.resolve(tld)
-                records != null && records.isNotEmpty()
-            }
             
-            if (tldFound) {
-                Log.d("HNSGo", "Forwarding to regular DNS (Handshake TLD '$tld' found but nameserver queries failed): $domainName")
+            // Skip blockchain check for common TLDs (they're definitely not Handshake domains)
+            val commonTLDs = setOf("com", "org", "net", "edu", "gov", "mil", "int", "io", "co", "uk", "de", "fr", "jp", "cn", "ru", "br", "au", "in", "it", "es", "nl", "se", "no", "dk", "fi", "pl", "cz", "gr", "ie", "pt", "be", "ch", "at", "nz", "za", "mx", "ar", "ca", "us")
+            val isCommonTLD = commonTLDs.contains(tld.lowercase())
+            
+            if (isCommonTLD) {
+                Log.d("HNSGo", "Forwarding to regular DNS (common TLD '$tld', skipping blockchain check): $domainName")
             } else {
-                Log.d("HNSGo", "Forwarding to regular DNS (TLD '$tld' not found in Handshake): $domainName")
+                // Only check blockchain for non-common TLDs (might be Handshake)
+                val tldFound = runBlocking {
+                    val records = SpvClient.resolve(tld)
+                    records != null && records.isNotEmpty()
+                }
+                
+                if (tldFound) {
+                    Log.d("HNSGo", "Forwarding to regular DNS (Handshake TLD '$tld' found but nameserver queries failed): $domainName")
+                } else {
+                    Log.d("HNSGo", "Forwarding to regular DNS (TLD '$tld' not found in Handshake): $domainName")
+                }
             }
             val response = runBlocking {
                 withContext(Dispatchers.IO) {

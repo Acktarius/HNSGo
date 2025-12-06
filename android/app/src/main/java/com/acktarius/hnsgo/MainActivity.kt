@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -31,12 +32,15 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -152,6 +156,11 @@ fun HnsGoScreen(act: MainActivity) {
     var certInstalled by remember { mutableStateOf(false) }
     var debugQueryResult by remember { mutableStateOf<String?>(null) }
     var debugQueryStatus by remember { mutableStateOf("") }
+    var step2Completed by remember { mutableStateOf(false) }
+    var step3Completed by remember { mutableStateOf(false) }
+    var daneUrl by remember { mutableStateOf("") }
+    var daneVerifying by remember { mutableStateOf(false) }
+    var daneResult by remember { mutableStateOf<DaneVerifier.VerificationResult?>(null) }
     val scope = rememberCoroutineScope()
     val typewriterFont = FontFamily.Monospace
     
@@ -404,53 +413,6 @@ fun HnsGoScreen(act: MainActivity) {
                     else -> {}
                 }
 
-                // Debug DNS Query Result
-                if (showGuidance && syncStatus == SyncStatus.SYNCED && debugQueryResult != null) {
-                    Spacer(Modifier.height(32.dp))
-                    
-                    Card(
-                        modifier = Modifier.fillMaxWidth(0.9f),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(
-                                "Debug: DNS Query Test",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            
-                            Spacer(Modifier.height(8.dp))
-                            
-                            Text(
-                                debugQueryStatus,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                debugQueryResult ?: "",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 10.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                
                 // DNS Setup Guidance
                 if (showGuidance && syncStatus == SyncStatus.SYNCED) {
                     Spacer(Modifier.height(32.dp))
@@ -673,268 +635,477 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(16.dp))
                     
                     // Step 2: Enable Third-Party CA in Firefox
-                    Text(
-                        "Step 2: Enable Third-Party CA in Firefox (Required)",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "Firefox requires an additional setting to trust user-installed CA certificates:",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "2.1 Open Firefox → Settings → About Firefox",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "2.2 Tap the Firefox logo 7 times to enable Secret Settings",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "2.3 Go back to Settings → Enable 'Use third party CA certificates'",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "⚠️ Without this step, Firefox will reject the DoH server certificate",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 10.sp
-                        ),
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                    )
-                    
-                    Spacer(Modifier.height(16.dp))
-                    
-                    // Step 3: Configure Firefox DoH
-                    Text(
-                        "Step 3: Configure Firefox DoH",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "3.1 Open Firefox → Settings → Network Settings",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "3.2 Enable 'DNS over HTTPS' → Select 'Custom'",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "3.3 Paste the DoH URL below:",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    // DoH URL with copy button
-                    Card(
-                        modifier = Modifier.fillMaxWidth(0.95f),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(0.9f)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Checkbox(
+                            checked = step2Completed,
+                            onCheckedChange = { step2Completed = it }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Step 2: Enable Third-Party CA in Firefox (Required)",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    
+                    if (!step2Completed) {
+                        Spacer(Modifier.height(8.dp))
+                        
+                        Text(
+                            "Firefox requires an additional setting to trust user-installed CA certificates:",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 11.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp)
+                                .fillMaxWidth(0.9f)
+                                .padding(start = 8.dp)
                         ) {
                             Text(
-                                "https://127.0.0.1:${Config.DOH_PORT}/dns-query",
+                                "2.1 Open Firefox → Settings → About Firefox",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                "2.2 Tap the Firefox logo 7 times to enable Secret Settings",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                "2.3 Go back to Settings → Enable 'Use third party CA certificates'",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                "⚠️ Without this step, Firefox will reject the DoH server certificate",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 10.sp
+                                ),
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
+                    // Step 3: Configure Firefox DoH
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        Checkbox(
+                            checked = step3Completed,
+                            onCheckedChange = { step3Completed = it }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Step 3: Configure Firefox DoH",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    
+                    if (!step3Completed) {
+                        Spacer(Modifier.height(8.dp))
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(start = 8.dp)
+                        ) {
+                            Text(
+                                "3.1 Open Firefox → Settings → Network Settings",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                "3.2 Enable 'DNS over HTTPS' → Select 'Custom'",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                "3.3 Paste the DoH URL below:",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // DoH URL with copy button
+                        Card(
+                            modifier = Modifier.fillMaxWidth(0.95f),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            ) {
+                                Text(
+                                    "https://127.0.0.1:${Config.DOH_PORT}/dns-query",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = typewriterFont,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
+                                            clipboard.setPrimaryClip(clip)
+                                            Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                                            Log.d("HNSGo", "DoH URL copied to clipboard")
+                                        }
+                                )
+                                IconButton(
+                                    onClick = {
                                         val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                                         clipboard.setPrimaryClip(clip)
                                         Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
                                         Log.d("HNSGo", "DoH URL copied to clipboard")
-                                    }
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.ContentCopy,
+                                        contentDescription = "Copy DoH URL",
+                                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(start = 8.dp)
+                        ) {
+                            Text(
+                                "3.4 Save settings and restart Firefox",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                             )
-                            IconButton(
-                                onClick = {
-                                    val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                    Log.d("HNSGo", "DoH URL copied to clipboard")
-                                },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.ContentCopy,
-                                    contentDescription = "Copy DoH URL",
-                                    tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(18.dp)
+                            
+                            Spacer(Modifier.height(8.dp))
+                            
+                            Text(
+                                "3.5 After restarting Firefox, visit this URL to accept the certificate:",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Health check URL with copy and open buttons
+                        Card(
+                            modifier = Modifier.fillMaxWidth(0.95f),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        "https://127.0.0.1:${Config.DOH_PORT}/health",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = typewriterFont,
+                                            fontSize = 11.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                val clip = ClipData.newPlainText("Health Check URL", "https://127.0.0.1:${Config.DOH_PORT}/health")
+                                                clipboard.setPrimaryClip(clip)
+                                                Toast.makeText(act, "Health check URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                                            }
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            val clip = ClipData.newPlainText("Health Check URL", "https://127.0.0.1:${Config.DOH_PORT}/health")
+                                            clipboard.setPrimaryClip(clip)
+                                            Toast.makeText(act, "Health check URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.ContentCopy,
+                                            contentDescription = "Copy Health Check URL",
+                                            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(start = 8.dp)
+                        ) {
+                            Text(
+                                "This will trigger Firefox to show a certificate warning. Click 'Advanced' → 'Accept the Risk and Continue'.",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                            
+                            Spacer(Modifier.height(4.dp))
+                            
+                            Text(
+                                "⚠️ Firefox must accept the certificate before DoH queries will work",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 10.sp
+                                ),
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                            )
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))                        
+                        
+                        Text(
+                            "To verify: Open Firefox → about:networking#dns → Check if queries show your DoH URL",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 10.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
+                    Text(
+                        "DANE Security Inspector",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        "Verify DANE (TLSA) certificate for Handshake websites before opening in Firefox:",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    OutlinedTextField(
+                        value = daneUrl,
+                        onValueChange = { daneUrl = it },
+                        label = {
+                            Text(
+                                "URL (e.g., https://nathan.woodburn/)",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        ),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = typewriterFont,
+                            fontSize = 11.sp
+                        ),
+                        enabled = !daneVerifying
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(0.9f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (daneUrl.isNotBlank()) {
+                                    daneVerifying = true
+                                    daneResult = null
+                                    scope.launch {
+                                        try {
+                                            val result = DaneVerifier.verify(daneUrl)
+                                            daneResult = result
+                                        } catch (e: Exception) {
+                                            Log.e("HNSGo", "DANE verification error", e)
+                                            daneResult = DaneVerifier.VerificationResult(
+                                                isValid = false,
+                                                message = "DANE status: cannot verify this certificate against TLSA. Browse at your own risk.",
+                                                tlsaFound = false,
+                                                certificateFound = false
+                                            )
+                                        } finally {
+                                            daneVerifying = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !daneVerifying && daneUrl.isNotBlank(),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (daneVerifying) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                "Verify DANE",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        
+                        Button(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(daneUrl))
+                                    act.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(act, "Error opening URL: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    Log.e("HNSGo", "Error opening URL in Firefox", e)
+                                }
+                            },
+                            enabled = daneResult?.isValid == true && !daneVerifying,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                "Open in Firefox",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+                    
+                    if (daneResult != null) {
+                        Spacer(Modifier.height(12.dp))
+                        
+                        Card(
+                            modifier = Modifier.fillMaxWidth(0.9f),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (daneResult!!.isValid) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                } else {
+                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                                }
+                            )
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(
+                                    daneResult!!.message,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = typewriterFont,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (daneResult!!.isValid) FontWeight.Bold else FontWeight.Normal
+                                    ),
+                                    color = if (daneResult!!.isValid) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                                    }
                                 )
                             }
                         }
                     }
                     
                     Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "3.4 Save settings and restart Firefox",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "⚠️ IMPORTANT: Verify Firefox is using DoH",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "If you don't see 'DoH: Connection from' logs when browsing Handshake sites, Firefox may be using system DNS instead of DoH.",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 10.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "To verify: Open Firefox → about:networking#dns → Check if queries show your DoH URL",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 10.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(16.dp))
-                    
-                    // Other browsers
-                    Text(
-                        "Other Browsers:",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Text(
-                        "• Chrome: Settings → Privacy and security → Security → Advanced → Use secure DNS → Custom → Paste URL above",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 10.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Text(
-                        "• Other apps: Check their DNS/Network settings for DoH configuration",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 10.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                    )
-                    
-                    Spacer(Modifier.height(16.dp))
-                    
-                    Text(
-                        "6. (Optional) Advanced: DANE Support",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 14.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text(
-                        "Note: DANE (DNS-Based Authentication of Named Entities) configuration is not available in Firefox for Android. This feature is primarily for desktop browsers.",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                    )
+
                 }
             }
         }

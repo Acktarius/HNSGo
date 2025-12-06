@@ -120,7 +120,6 @@ object NameResolver {
         lastHeaders.forEachIndexed { index, header ->
             val headerHeight = firstHeaderHeight + (headerChain.size - lastHeaders.size + index)
             val rootHex = header.nameRoot.joinToString("") { "%02x".format(it) }
-            android.util.Log.w("HNSGo", "NameResolver:   Height $headerHeight: root=$rootHex")
         }
         
         // EXACT MATCH to hnsd's hsk_chain_safe_root (chain.c:180-209)
