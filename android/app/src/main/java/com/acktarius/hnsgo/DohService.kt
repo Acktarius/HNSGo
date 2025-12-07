@@ -724,24 +724,55 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             // DNS queries are case-insensitive, but Handshake name hashing is case-sensitive
             val name = nameStr as String
             val type = q.type
+            // DNS class - dnsjava's dclass field is protected
+            // For DNS queries, class is almost always IN (Internet), so default to IN
+            // This matches standard DNS behavior where 99.9% of queries use IN class
+            val dclass = DClass.IN
 
-            Log.d("HNSGo", "DoH: Resolving $name (type ${Type.string(type)})")
+            Log.d("HNSGo", "DoH: Resolving $name (type ${Type.string(type)}, class $dclass)")
 
-            // Quick check: if TLD is a common non-Handshake TLD, skip Handshake resolution
-            val tld = ResourceRecord.extractTLD(name)
-            val commonTLDs = setOf("com", "org", "net", "edu", "gov", "mil", "int", "io", "co", "uk", "de", "fr", "jp", "cn", "ru", "br", "au", "in", "it", "es", "nl", "se", "no", "dk", "fi", "pl", "cz", "gr", "ie", "pt", "be", "ch", "at", "nz", "za", "mx", "ar", "ca", "us")
-            
-            // If it's a common TLD, immediately fall back to regular DNS (much faster)
-            val isCommonTLD = commonTLDs.contains(tld.lowercase())
-            if (isCommonTLD) {
-                Log.i("HNSGo", "DoH: TLD '$tld' is a common non-Handshake TLD, skipping Handshake resolution for $name")
+            // CRITICAL: Check cache FIRST (before any network work)
+            // Use (qname, qtype, qclass) as cache key for correctness
+            val cached = CacheManager.get(name, type, dclass)
+            if (cached != null) {
+                Log.d("HNSGo", "DoH: Cache HIT for '$name' (type ${Type.string(type)})")
+                // CRITICAL: Update query ID in cached response to match incoming query
+                // DNS responses must have the same query ID as the query, otherwise clients reject them
+                try {
+                    val cachedMsg = org.xbill.DNS.Message(cached)
+                    cachedMsg.header.id = msg.header.id
+                    val updatedWireData = cachedMsg.toWire()
+                    return NanoHTTPD.newFixedLengthResponse(
+                        Status.OK,
+                        "application/dns-message",
+                        ByteArrayInputStream(updatedWireData),
+                        updatedWireData.size.toLong()
+                    )
+                } catch (e: Exception) {
+                    Log.w("HNSGo", "DoH: Error updating query ID in cached response, using original: ${e.message}")
+                    // Fallback: return cached response as-is (might work if query ID happens to match)
+                    return NanoHTTPD.newFixedLengthResponse(
+                        Status.OK,
+                        "application/dns-message",
+                        ByteArrayInputStream(cached),
+                        cached.size.toLong()
+                    )
+                }
+            }
+
+            // CRITICAL: Check TLD FIRST before any SPV/blockchain work
+            // If it's an ICANN TLD, immediately forward to upstream DNS (9.9.9.9)
+            // This matches hnsd behavior - all ICANN TLDs are reserved in Handshake
+            if (Tld.isIcannDomain(name)) {
+                Log.i("HNSGo", "DoH: Domain '$name' uses ICANN TLD, forwarding to upstream DNS (skipping SPV)")
                 return forwardToDns(msg, name)
             }
 
-            // Try Handshake recursive resolution first (with timeout to avoid hanging)
+            // Cache MISS - Try Handshake recursive resolution (with timeout to avoid hanging)
+            // Increased timeout to 10 seconds to allow for slow P2P connections
             val response = try {
                 runBlocking { 
-                    withTimeoutOrNull(2000) { // 2 second timeout for Handshake resolution
+                    withTimeoutOrNull(10000) { // 10 second timeout for Handshake resolution
                         RecursiveResolver.resolve(name, type)
                     }
                 }
@@ -791,6 +822,16 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             val wireData = resp.toWire()
             Log.d("HNSGo", "DoH: Sending response (${wireData.size} bytes) for $name")
             
+            // Cache successful Handshake resolution (extract TTL from answer records)
+            val answers = response.getSection(Section.ANSWER)
+            val ttl = if (answers.isNotEmpty()) {
+                answers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
+            } else {
+                Config.DNS_CACHE_TTL_SECONDS
+            }
+            CacheManager.put(name, type, dclass, wireData, ttl)
+            Log.d("HNSGo", "DoH: Cached Handshake resolution for '$name' with TTL $ttl seconds")
+            
             // Check if socket is still open before sending response
             // Firefox may close the connection if it doesn't trust the certificate
             try {
@@ -811,8 +852,13 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         // Handshake resolution failed - could be:
         // 1. TLD not found in blockchain
         // 2. TLD found but nameserver queries timed out/failed
-        // Fall back to regular DNS
-        return forwardToDns(msg, name)
+        // 3. P2P queries timed out (network issues)
+        // 
+        // CRITICAL: Don't fall back to 9.9.9.9 for Handshake domains - they won't be there!
+        // Invalidate cache for this domain so next query tries fresh resolution
+        Log.w("HNSGo", "DoH: Handshake resolution failed for '$name' - invalidating cache and returning SERVFAIL")
+        CacheManager.remove(name, type, dclass)
+        return createDnsErrorResponse(Rcode.SERVFAIL, "Handshake resolution failed - P2P queries timed out or TLD not found", msg)
         } catch (e: java.net.SocketException) {
             // Socket was closed - likely Firefox rejected the certificate or closed connection
             if (e.message?.contains("closed") == true || e.message?.contains("Socket is closed") == true) {
@@ -847,36 +893,69 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
         return try {
             val questions = query.getSection(Section.QUESTION)
             val domainName = name ?: (if (questions.isNotEmpty()) questions[0].name.toString() else "unknown")
-            val tld = ResourceRecord.extractTLD(domainName)
+            val queryType = if (questions.isNotEmpty()) questions[0].type else Type.A
+            // DNS class - dnsjava's dclass field is protected
+            // For DNS queries, class is almost always IN (Internet), so default to IN
+            val queryClass = DClass.IN
             
-            // Skip blockchain check for common TLDs (they're definitely not Handshake domains)
-            val commonTLDs = setOf("com", "org", "net", "edu", "gov", "mil", "int", "io", "co", "uk", "de", "fr", "jp", "cn", "ru", "br", "au", "in", "it", "es", "nl", "se", "no", "dk", "fi", "pl", "cz", "gr", "ie", "pt", "be", "ch", "at", "nz", "za", "mx", "ar", "ca", "us")
-            val isCommonTLD = commonTLDs.contains(tld.lowercase())
-            
-            if (isCommonTLD) {
-                Log.d("HNSGo", "Forwarding to regular DNS (common TLD '$tld', skipping blockchain check): $domainName")
-            } else {
-                // Only check blockchain for non-common TLDs (might be Handshake)
-                val tldFound = runBlocking {
-                    val records = SpvClient.resolve(tld)
-                    records != null && records.isNotEmpty()
-                }
-                
-                if (tldFound) {
-                    Log.d("HNSGo", "Forwarding to regular DNS (Handshake TLD '$tld' found but nameserver queries failed): $domainName")
-                } else {
-                    Log.d("HNSGo", "Forwarding to regular DNS (TLD '$tld' not found in Handshake): $domainName")
+            // Check cache first (critical for performance - avoids re-querying 9.9.9.9 for repeated lookups)
+            // Use (qname, qtype, qclass) as cache key for correctness
+            val cached = CacheManager.get(domainName, queryType, queryClass)
+            if (cached != null) {
+                Log.d("HNSGo", "DoH: Cache HIT for '$domainName' (type ${Type.string(queryType)})")
+                // CRITICAL: Update query ID in cached response to match incoming query
+                try {
+                    val cachedMsg = org.xbill.DNS.Message(cached)
+                    cachedMsg.header.id = query.header.id
+                    val updatedWireData = cachedMsg.toWire()
+                    return NanoHTTPD.newFixedLengthResponse(
+                        Status.OK,
+                        "application/dns-message",
+                        ByteArrayInputStream(updatedWireData),
+                        updatedWireData.size.toLong()
+                    )
+                } catch (e: Exception) {
+                    Log.w("HNSGo", "DoH: Error updating query ID in cached response, using original: ${e.message}")
+                    return NanoHTTPD.newFixedLengthResponse(
+                        Status.OK,
+                        "application/dns-message",
+                        ByteArrayInputStream(cached),
+                        cached.size.toLong()
+                    )
                 }
             }
+            
+            Log.d("HNSGo", "DoH: Cache MISS for '$domainName', forwarding to upstream DNS (9.9.9.9)")
+            
+            // Query upstream DNS (9.9.9.9)
             val response = runBlocking {
                 withContext(Dispatchers.IO) {
                     fallbackResolver.send(query)
                 }
             }
+            
+            // Cache the response (extract TTL from answer records)
+            val answers = response.getSection(Section.ANSWER)
+            val ttl = if (answers.isNotEmpty()) {
+                // Use minimum TTL from answer records (RFC 1035)
+                answers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
+            } else {
+                // No answers, use default TTL
+                Config.DNS_CACHE_TTL_SECONDS
+            }
+            
             val wireData = response.toWire()
-            NanoHTTPD.newFixedLengthResponse(Status.OK, "application/dns-message", ByteArrayInputStream(wireData), wireData.size.toLong())
+            CacheManager.put(domainName, queryType, queryClass, wireData, ttl)
+            Log.d("HNSGo", "DoH: Cached response for '$domainName' with TTL $ttl seconds")
+            
+            NanoHTTPD.newFixedLengthResponse(
+                Status.OK,
+                "application/dns-message",
+                ByteArrayInputStream(wireData),
+                wireData.size.toLong()
+            )
         } catch (e: Exception) {
-            Log.e("HNSGo", "Error forwarding DNS query", e)
+            Log.e("HNSGo", "Error forwarding DNS query for '$name'", e)
             nxdomain(query)
         }
     }

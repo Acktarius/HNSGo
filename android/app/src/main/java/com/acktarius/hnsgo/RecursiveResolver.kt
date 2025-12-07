@@ -224,45 +224,47 @@ object RecursiveResolver {
         
         // Build nameserver IP list from GLUE records
         // GLUE record format: "name\0ip" (name + null byte + IP string)
-        val nameserverIPs = mutableListOf<Pair<String, Boolean>>() // (IP, isIPv6)
+        // CRITICAL: Prioritize IPv4 over IPv6 (IPv4 is faster and more reliable)
+        val ipv4Addresses = mutableListOf<String>()
+        val ipv6Addresses = mutableListOf<String>()
         
-        // Add IPv4 addresses
+        // Add IPv4 addresses first
         glueARecords.forEach { rec ->
             val glueData = String(rec.data, Charsets.UTF_8)
             val nullIndex = glueData.indexOf('\u0000')
             if (nullIndex > 0) {
                 val ip = glueData.substring(nullIndex + 1).trim()
-                nameserverIPs.add(Pair(ip, false))
+                ipv4Addresses.add(ip)
             } else {
                 // Fallback: old format (just IP)
                 val ip = glueData.trim()
-                nameserverIPs.add(Pair(ip, false))
+                ipv4Addresses.add(ip)
             }
         }
         
-        // Add IPv6 addresses
+        // Add IPv6 addresses (will try after IPv4)
         glueAAAARecords.forEach { rec ->
             val glueData = String(rec.data, Charsets.UTF_8)
             val nullIndex = glueData.indexOf('\u0000')
             if (nullIndex > 0) {
                 val ip = glueData.substring(nullIndex + 1).trim()
-                nameserverIPs.add(Pair(ip, true))
+                ipv6Addresses.add(ip)
             } else {
                 // Fallback: old format (just IP)
                 val ip = glueData.trim()
-                nameserverIPs.add(Pair(ip, true))
+                ipv6Addresses.add(ip)
             }
         }
         
-        if (nameserverIPs.isEmpty()) {
+        if (ipv4Addresses.isEmpty() && ipv6Addresses.isEmpty()) {
             Log.w("HNSGo", "RecursiveResolver: No nameserver IPs available (no GLUE records)")
             return@withContext null
         }
         
-        Log.d("HNSGo", "RecursiveResolver: Querying ${nameserverIPs.size} nameservers for '$name'")
+        Log.d("HNSGo", "RecursiveResolver: Querying ${ipv4Addresses.size} IPv4 + ${ipv6Addresses.size} IPv6 nameservers for '$name'")
         
-        // Try each nameserver
-        for ((ip, _) in nameserverIPs) {
+        // Try IPv4 nameservers first (faster, more reliable)
+        for (ip in ipv4Addresses) {
             try {
                 val answer = queryNameserver(name, type, ip)
                 if (answer != null) {
@@ -277,12 +279,35 @@ object RecursiveResolver {
                     }
                 }
             } catch (e: Exception) {
-                Log.w("HNSGo", "RecursiveResolver: Error querying nameserver $ip: ${e.message}")
+                Log.w("HNSGo", "RecursiveResolver: Error querying IPv4 nameserver $ip: ${e.message}")
                 continue
             }
         }
         
-        Log.w("HNSGo", "RecursiveResolver: All nameservers failed for '$name'")
+        // If IPv4 failed, try IPv6 nameservers (slower, but may work if IPv4 unavailable)
+        if (ipv6Addresses.isNotEmpty()) {
+            Log.d("HNSGo", "RecursiveResolver: IPv4 nameservers failed, trying ${ipv6Addresses.size} IPv6 nameservers")
+            for (ip in ipv6Addresses) {
+                try {
+                    val answer = queryNameserver(name, type, ip)
+                    if (answer != null) {
+                        val answers = answer.getSection(Section.ANSWER)
+                        if (answers.isNotEmpty()) {
+                            val recordTypes = answers.map { record ->
+                                "${Type.string(record.type)}(${record.rdataToString()})"
+                            }.joinToString(", ")
+                            Log.d("HNSGo", "RecursiveResolver: Got answer from IPv6 $ip: ${answers.size} records [${recordTypes}]")
+                            return@withContext answer
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("HNSGo", "RecursiveResolver: Error querying IPv6 nameserver $ip: ${e.message}")
+                    continue
+                }
+            }
+        }
+        
+        Log.w("HNSGo", "RecursiveResolver: All nameservers failed for '$name' (${ipv4Addresses.size} IPv4 + ${ipv6Addresses.size} IPv6)")
         return@withContext null
     }
     

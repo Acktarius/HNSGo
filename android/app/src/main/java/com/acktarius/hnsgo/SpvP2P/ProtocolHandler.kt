@@ -50,7 +50,6 @@ internal object ProtocolHandler {
             }
             
             try {
-                Log.d("HNSGo", "ProtocolHandler: Waiting for handshake message (attempt ${attempts + 1}/$maxAttempts)...")
                 val message = messageHandler.receiveMessage(input)
                 if (message == null) {
                     if (attempts == 0) {
@@ -59,15 +58,12 @@ internal object ProtocolHandler {
                     return Triple(false, null, null)
                 }
                 
-                Log.d("HNSGo", "ProtocolHandler: Received message: ${message.command}")
-                
                 when (message.command) {
                     "version" -> {
                         try {
                             val versionData = messageHandler.parseVersionMessage(message.payload)
                             peerHeight = versionData.height
                             peerServices = versionData.services
-                            Log.d("HNSGo", "ProtocolHandler: Peer version: ${versionData.version}, height: ${versionData.height}, services: ${versionData.services} (0x${versionData.services.toString(16)})")
                             versionReceived = true
                             if (!ourVerackSent) {
                                 messageHandler.sendMessage(output, "verack", byteArrayOf())
@@ -92,7 +88,6 @@ internal object ProtocolHandler {
                             if (message.payload.size >= 8) {
                                 val nonce = ByteBuffer.wrap(message.payload.sliceArray(0..7))
                                     .order(ByteOrder.LITTLE_ENDIAN).long
-                                Log.d("HNSGo", "ProtocolHandler: Received ping (nonce=$nonce) during handshake, sending pong")
                                 val pongPayload = ByteArray(8).apply {
                                     ByteBuffer.wrap(this).order(ByteOrder.LITTLE_ENDIAN).putLong(nonce)
                                 }
@@ -104,7 +99,7 @@ internal object ProtocolHandler {
                         // Continue handshake - don't break
                     }
                     else -> {
-                        Log.d("HNSGo", "ProtocolHandler: Received ${message.command} during handshake (ignoring, waiting for version/verack)")
+                        // Ignore other messages during handshake
                     }
                 }
             } catch (e: SocketTimeoutException) {
@@ -125,9 +120,7 @@ internal object ProtocolHandler {
         }
         
         val success = versionReceived && verackReceived
-        if (success) {
-            Log.d("HNSGo", "ProtocolHandler: Handshake successful")
-        } else {
+        if (!success) {
             Log.w("HNSGo", "ProtocolHandler: Handshake incomplete")
         }
         return Triple(success, peerHeight, peerServices)
@@ -184,7 +177,6 @@ internal object ProtocolHandler {
             write(0)
         }.toByteArray()
         
-        Log.d("HNSGo", "ProtocolHandler: Sending version (version=$version, height=$chainHeight, payload=${payload.size} bytes)")
         messageHandler.sendMessage(output, "version", payload)
     }
     
@@ -213,24 +205,14 @@ internal object ProtocolHandler {
             messageHandler.writeBytesToStream(this, ByteArray(32)) // Stop hash (all zeros = no stop)
         }.toByteArray()
         
-        // Log first and last hash for debugging
-        val firstHash = hashes.first()
-        val firstHashHex = firstHash.joinToString("") { "%02x".format(it) }
-        val lastHash = hashes.last()
-        val lastHashHex = lastHash.joinToString("") { "%02x".format(it) }
-        Log.d("HNSGo", "ProtocolHandler:sendGetHeaders: Sending getheaders with ${hashes.size} locator hashes")
-        Log.d("HNSGo", "ProtocolHandler:sendGetHeaders: First hash (tip): $firstHashHex")
-        Log.d("HNSGo", "ProtocolHandler:sendGetHeaders: Last hash: $lastHashHex")
         messageHandler.sendMessage(output, "getheaders", payload)
     }
     
     fun sendSendHeaders(output: OutputStream, messageHandler: MessageHandler) {
-        Log.d("HNSGo", "ProtocolHandler: Sending sendheaders")
         messageHandler.sendMessage(output, "sendheaders", byteArrayOf())
     }
     
     fun sendGetAddr(output: OutputStream, messageHandler: MessageHandler) {
-        Log.d("HNSGo", "ProtocolHandler: Sending getaddr")
         messageHandler.sendMessage(output, "getaddr", byteArrayOf())
     }
     
@@ -291,24 +273,18 @@ internal object ProtocolHandler {
         var totalValidHeaders = 0  // Track valid headers across all batches
         var receivedAnyHeaders = false  // Track if we received any headers at all
         
-        Log.d("HNSGo", "ProtocolHandler: Starting to receive headers...")
-        
         while (headersReceived < 2000) { // Limit to prevent infinite loop
-            Log.d("HNSGo", "ProtocolHandler: Waiting for headers message...")
             val message = messageHandler.receiveMessage(input)
             if (message == null) {
                 Log.w("HNSGo", "ProtocolHandler: Failed to receive message, stopping")
                 break
             }
             
-            Log.d("HNSGo", "ProtocolHandler: Received message: ${message.command}, payload size: ${message.payload.size}")
-            
             // Handle ping messages (peers send ping to keep connection alive)
             // Matching hnsd's hsk_peer_on_ping behavior
             if (message.command == "ping") {
                 try {
                     val nonce = java.nio.ByteBuffer.wrap(message.payload).order(java.nio.ByteOrder.LITTLE_ENDIAN).long
-                    Log.d("HNSGo", "ProtocolHandler: Received ping (nonce=$nonce), sending pong")
                     val pongPayload = ByteArray(8).apply {
                         java.nio.ByteBuffer.wrap(this).order(java.nio.ByteOrder.LITTLE_ENDIAN).putLong(nonce)
                     }
@@ -322,22 +298,18 @@ internal object ProtocolHandler {
             
             // Handle pong messages (response to our ping, if any)
             if (message.command == "pong") {
-                Log.d("HNSGo", "ProtocolHandler: Received pong, continuing to wait for headers")
                 continue // Continue waiting for headers
             }
             
             // Handle inv (inventory) messages (full nodes send these to announce new blocks/txs)
             // We're SPV, so we ignore them and continue waiting for headers
             if (message.command == "inv") {
-                Log.d("HNSGo", "ProtocolHandler: Received inv (inventory) message, ignoring (SPV doesn't need inventory), continuing to wait for headers")
                 continue // Continue waiting for headers
             }
             
             if (message.command == "headers") {
                 receivedAnyHeaders = true  // We received headers (even if they'll be rejected)
-                Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Parsing headers from payload (${message.payload.size} bytes)...")
                 val headers = messageHandler.parseHeaders(message.payload)
-                Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Parsed ${headers.size} headers from message")
                 
                 // OPTIMIZATION: Pre-compute all hashes in parallel (CPU-intensive work)
                 // This is much faster than computing hashes sequentially (2000 headers in parallel vs sequential)
@@ -351,15 +323,6 @@ internal object ProtocolHandler {
                     }.awaitAll()
                 }.associate { it.first to it.second }
                 
-                if (headers.isNotEmpty()) {
-                    // Log first and last header hashes (using pre-computed hashes)
-                    // MEMORY OPTIMIZATION: Use HexUtils to avoid string allocations
-                    val firstHash = headerHashes[0]!!
-                    val lastHash = headerHashes[headers.size - 1]!!
-                    Log.d("HNSGo", "ProtocolHandler:receiveHeaders: First header hash: ${HexUtils.toHexShort(firstHash)}")
-                    Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Last header hash: ${HexUtils.toHexShort(lastHash)}")
-                }
-                
                 var validCount = 0
                 var invalidCount = 0
                 var duplicateCount = 0
@@ -371,32 +334,16 @@ internal object ProtocolHandler {
                     if (isValid) {
                         validCount++
                         totalValidHeaders++  // Track valid headers across batches
-                        // MEMORY OPTIMIZATION: Only log when needed (reduces string allocations)
-                        // Log first few and every 100th header for debugging
-                        if (index < 3 || index % 100 == 0) {
-                            Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Header $index: VALID hash=${HexUtils.toHexShort(headerHash)}")
-                        }
                     } else {
                         invalidCount++
                         // Check if this is a duplicate (we already have it) or a chain connection failure
                         // Matching hnsd: continue on duplicates, only stop on chain connection failures
-                        // A duplicate means we already have this header - continue to find new ones
-                        // A chain connection failure means prevBlock doesn't match - stop processing
-                        
-                        // Check if this is a duplicate by checking if hash is in our set
-                        // If it's a duplicate, continue processing (matching hnsd's HSK_EDUPLICATE behavior)
                         duplicateCount++
-                        // MEMORY OPTIMIZATION: Only log duplicates when debugging (reduces allocations)
-                        if (index < 10) { // Only log first 10 duplicates
-                            Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Header $index: DUPLICATE/SKIP hash=${HexUtils.toHexShort(headerHash)} (already have it, continuing)")
-                        }
                         // Continue processing - duplicates are OK, we'll find new headers later in the batch
                     }
                     
                     headersReceived++
                 }
-                
-                Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Processed ${headers.size} headers (valid: $validCount, duplicates: $duplicateCount, invalid: $invalidCount)")
                 
                 // CRITICAL FIX: If we got headers but they were all rejected (duplicates/old),
                 // and we got fewer than 2000 headers, the peer might have more headers after the last one.
@@ -408,7 +355,6 @@ internal object ProtocolHandler {
                     // All headers were rejected - they might be old headers from earlier locator
                     // Request more headers using the last header hash as locator to get headers after it
                     val lastHeaderHash = headerHashes[headers.size - 1]!!
-                    Log.d("HNSGo", "ProtocolHandler:receiveHeaders: All headers rejected, requesting more headers after last received header")
                     val nextLocator = listOf(lastHeaderHash)
                     sendGetHeaders(output, nextLocator, messageHandler)
                     continue  // Continue loop to wait for next batch
@@ -417,16 +363,12 @@ internal object ProtocolHandler {
                 // Matching hnsd exactly (pool.c:1519-1524):
                 // - If batch size == 2000, request more headers (continue loop)
                 // - Otherwise, return (break) - hnsd doesn't wait for more headers
-                // hnsd processes ONE batch and returns, it doesn't loop waiting for multiple batches
                 if (headers.size == 2000) {
-                    Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Got 2000 headers, requesting more (matching hnsd behavior)")
                     // Continue loop to wait for next batch (hnsd sends getheaders and processes next batch)
                     continue
                 }
                 
                 // Batch size < 2000: hnsd returns HSK_SUCCESS (doesn't wait for more)
-                // This matches hnsd line 1524: return HSK_SUCCESS (when header_count != 2000)
-                Log.d("HNSGo", "ProtocolHandler:receiveHeaders: Got ${headers.size} headers (< 2000), done with this batch (matching hnsd: returns HSK_SUCCESS)")
                 break
             } else if (message.command == "notfound") {
                 // Peer doesn't have the requested headers - stop waiting and try next peer
@@ -434,13 +376,8 @@ internal object ProtocolHandler {
                 val payloadSize = message.payload.size
                 Log.w("HNSGo", "ProtocolHandler: Peer responded with 'notfound' - doesn't have requested headers, stopping - payload size: $payloadSize, payload: $payloadHex")
                 break
-            } else {
-                // Handle other messages (addr, etc.) but continue waiting for headers
-                Log.d("HNSGo", "ProtocolHandler: Received non-headers message: ${message.command}, continuing to wait for headers...")
             }
         }
-        
-        Log.d("HNSGo", "ProtocolHandler: Finished receiving headers, total processed: $headersReceived, valid: $totalValidHeaders")
         // Return result indicating if we got valid headers and if we received any headers at all
         // This allows ConnectionManager to distinguish between "notfound" and "headers received but rejected"
         return@withContext ReceiveHeadersResult(

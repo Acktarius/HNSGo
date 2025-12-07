@@ -52,7 +52,8 @@ object NameResolver {
             android.util.Log.w("HNSGo", "NameResolver: Not enough headers synced (height: $chainHeight, required: $minRequiredHeight)")
         }
         
-        val cached = CacheManager.get(tld, 1)
+        // Use (qname, qtype, qclass) as cache key - for TLD proof cache, use DClass.IN
+        val cached = CacheManager.get(tld, 1, org.xbill.DNS.DClass.IN)
         if (cached != null) {
             android.util.Log.d("HNSGo", "NameResolver: Found cached record for TLD '$tld'")
             // Parse cached Handshake records and convert to DNS format (matching fresh query behavior)
@@ -80,7 +81,8 @@ object NameResolver {
                 if (dnsRecords.isNotEmpty()) {
                     android.util.Log.d("HNSGo", "NameResolver: Converted to ${dnsRecords.size} DNS records for '$name'")
                     val proofData = convertRecordsToProof(blockchainRecords, tld)
-                    CacheManager.put(tld, 1, proofData, Config.DNS_CACHE_TTL_SECONDS)
+                    // Use (qname, qtype, qclass) as cache key - for TLD proof cache, use DClass.IN
+                    CacheManager.put(tld, 1, org.xbill.DNS.DClass.IN, proofData, Config.DNS_CACHE_TTL_SECONDS)
                     android.util.Log.d("HNSGo", "NameResolver: Cached TLD '$tld' for ${Config.DNS_CACHE_TTL_SECONDS} seconds (6 hours)")
                     return@withContext dnsRecords
                 }

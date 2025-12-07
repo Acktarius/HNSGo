@@ -83,9 +83,6 @@ internal object MessageHandler {
             System.arraycopy(payload, 0, this, 9, payload.size)
         }
         
-        val debugBytes = message.take(20).joinToString(" ") { "%02x".format(it) }
-        Log.d("HNSGo", "MessageHandler: Sending message: cmd=$command (code=$cmdCode), size=${message.size}, first 20 bytes: $debugBytes")
-        
         // For getproof messages, log the complete wire format for byte-for-byte comparison
         if (command == "getproof") {
             val messageHex = message.joinToString("") { "%02x".format(it) }
@@ -125,7 +122,6 @@ internal object MessageHandler {
                 // Socket timeout is set to 30 seconds, so this will throw SocketTimeoutException if no data
                 val n = input.read(header, read, 9 - read)
                 if (n == -1) {
-                    Log.d("HNSGo", "MessageHandler: EOF while reading message header")
                     return@withContext null
                 }
                 read += n
@@ -146,7 +142,6 @@ internal object MessageHandler {
             }
             
             val command = codeToCommand(cmdCode)
-            Log.d("HNSGo", "MessageHandler: Received message header: $command (code=$cmdCode, payload size=$length)")
             
             // Step 2: Read payload (matching hnsd's buffering behavior)
             // hnsd allocates buffer and reads in chunks until complete
@@ -172,7 +167,6 @@ internal object MessageHandler {
                 read += n
             }
             
-            Log.d("HNSGo", "MessageHandler: Successfully received complete message: $command (${payload.size} bytes)")
             return@withContext P2PMessage(command, payload)
         } catch (e: java.net.SocketTimeoutException) {
             Log.w("HNSGo", "MessageHandler: Socket timeout while receiving message", e)
@@ -212,9 +206,6 @@ internal object MessageHandler {
             val root = ByteArray(32).apply { buffer.get(this) }
             val key = ByteArray(32).apply { buffer.get(this) }
             
-            Log.d("HNSGo", "MessageHandler: Proof message root: ${root.joinToString("") { "%02x".format(it) }.take(16)}...")
-            Log.d("HNSGo", "MessageHandler: Proof message key: ${key.joinToString("") { "%02x".format(it) }.take(16)}...")
-            
             val proofBytes = ByteArray(buffer.remaining()).apply { buffer.get(this) }
             return Pair(emptyList(), proofBytes)
         } catch (e: Exception) {
@@ -229,7 +220,6 @@ internal object MessageHandler {
         
         try {
             val count = readVarInt(buffer)
-            Log.d("HNSGo", "MessageHandler: Parsing $count headers (236 bytes each)")
             
             for (i in 0 until count) {
                 if (buffer.remaining() < 236) {
