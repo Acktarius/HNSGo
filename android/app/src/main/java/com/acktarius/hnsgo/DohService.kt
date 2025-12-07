@@ -79,6 +79,9 @@ class DohService : Service() {
                     SpvClient.setResolver(Config.DEBUG_RESOLVER_HOST, Config.DEBUG_RESOLVER_PORT)
                     SpvClient.init(filesDir, this@DohService)
                     
+                    // Initialize AdBlockManager
+                    AdBlockManager.init(this@DohService)
+                    
                     // Start DoH server
                     Log.d("HNSGo", "Creating LocalDoHServer...")
                     val newDohServer = LocalDoHServer()
@@ -730,6 +733,12 @@ class LocalDoHServer : NanoHTTPD(Config.DOH_PORT) {
             val dclass = DClass.IN
 
             Log.d("HNSGo", "DoH: Resolving $name (type ${Type.string(type)}, class $dclass)")
+
+            // Check ad blocking FIRST (before cache, to prevent caching blocked domains)
+            if (AdBlockManager.isBlocked(name)) {
+                Log.i("HNSGo", "DoH: Domain '$name' is blocked by ad blocker, returning NXDOMAIN")
+                return createDnsErrorResponse(Rcode.NXDOMAIN, "Domain blocked by ad blocker", msg)
+            }
 
             // CRITICAL: Check cache FIRST (before any network work)
             // Use (qname, qtype, qclass) as cache key for correctness

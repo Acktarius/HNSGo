@@ -158,6 +158,10 @@ fun HnsGoScreen(act: MainActivity) {
     var debugQueryStatus by remember { mutableStateOf("") }
     var step2Completed by remember { mutableStateOf(false) }
     var step3Completed by remember { mutableStateOf(false) }
+    var step4Completed by remember { mutableStateOf(false) }
+    var adBlockingEnabled by remember { mutableStateOf(false) }
+    var adBlockingLoading by remember { mutableStateOf(false) }
+    var privacyModeEnabled by remember { mutableStateOf(false) }
     var daneUrl by remember { mutableStateOf("") }
     var daneVerifying by remember { mutableStateOf(false) }
     var daneResult by remember { mutableStateOf<DaneVerifier.VerificationResult?>(null) }
@@ -168,6 +172,11 @@ fun HnsGoScreen(act: MainActivity) {
     LaunchedEffect(Unit) {
         certInstalled = CertHelper.isCAInstalledSync(act)
         Log.d("HNSGo", "Certificate installed status: $certInstalled")
+        // Initialize AdBlockManager
+        AdBlockManager.init(act)
+        // Load saved enabled state
+        adBlockingEnabled = AdBlockManager.isEnabled()
+        privacyModeEnabled = AdBlockManager.isPrivacyModeEnabled()
     }
     
     // Listen for debug query results from DohService
@@ -673,7 +682,6 @@ fun HnsGoScreen(act: MainActivity) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth(0.9f)
-                                .padding(start = 8.dp)
                         ) {
                             Text(
                                 "2.1 Open Firefox → Settings → About Firefox",
@@ -749,7 +757,6 @@ fun HnsGoScreen(act: MainActivity) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth(0.9f)
-                                .padding(start = 8.dp)
                         ) {
                             Text(
                                 "3.1 Open Firefox → Settings → Network Settings",
@@ -840,7 +847,6 @@ fun HnsGoScreen(act: MainActivity) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth(0.9f)
-                                .padding(start = 8.dp)
                         ) {
                             Text(
                                 "3.4 Save settings and restart Firefox",
@@ -918,7 +924,6 @@ fun HnsGoScreen(act: MainActivity) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth(0.9f)
-                                .padding(start = 8.dp)
                         ) {
                             Text(
                                 "This will trigger Firefox to show a certificate warning. Click 'Advanced' → 'Accept the Risk and Continue'.",
@@ -951,6 +956,156 @@ fun HnsGoScreen(act: MainActivity) {
                             ),
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                         )
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
+                    // Step 4: Enable Ad Blocking
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        Checkbox(
+                            checked = step4Completed,
+                            onCheckedChange = { step4Completed = it }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Step 4: Enable Ad Blocking",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    
+                    if (!step4Completed) {
+                        Spacer(Modifier.height(8.dp))
+                        
+                        Text(
+                            "Block ads and trackers by using a blacklist from known references:",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont,
+                                fontSize = 11.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Row 1: Main toggle switch
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            Switch(
+                                checked = adBlockingEnabled,
+                                onCheckedChange = { newValue ->
+                                    adBlockingEnabled = newValue
+                                    if (newValue) {
+                                        // Refresh blacklist when turned ON
+                                        adBlockingLoading = true
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                AdBlockManager.refreshBlacklist()
+                                                withContext(Dispatchers.Main) {
+                                                    adBlockingLoading = false
+                                                    Toast.makeText(act, "Ad blocking enabled", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("HNSGo", "Error refreshing ad block blacklist", e)
+                                                withContext(Dispatchers.Main) {
+                                                    adBlockingLoading = false
+                                                    Toast.makeText(act, "Error loading blacklist: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        AdBlockManager.disable()
+                                        Toast.makeText(act, "Ad blocking disabled", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                enabled = !adBlockingLoading
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            if (adBlockingLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                if (adBlockingEnabled) "ON" else "OFF",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 14.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "(list refresh on flip back and forth)",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 10.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        
+                        Spacer(Modifier.height(8.dp))
+                        
+                        // Row 2: Privacy Mode Toggle
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            Switch(
+                                checked = privacyModeEnabled,
+                                onCheckedChange = { newValue ->
+                                    privacyModeEnabled = newValue
+                                    AdBlockManager.setPrivacyMode(newValue)
+                                    if (adBlockingEnabled && newValue) {
+                                        // If ad blocking is already enabled, refresh with new mode
+                                        adBlockingLoading = true
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                AdBlockManager.refreshBlacklist()
+                                                withContext(Dispatchers.Main) {
+                                                    adBlockingLoading = false
+                                                    Toast.makeText(act, "Privacy mode ${if (newValue) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("HNSGo", "Error refreshing blacklist with privacy mode", e)
+                                                withContext(Dispatchers.Main) {
+                                                    adBlockingLoading = false
+                                                    Toast.makeText(act, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Toast.makeText(act, "Privacy mode ${if (newValue) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                enabled = !adBlockingLoading
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                "Stricter Mode minimize tracking",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        
                     }
                     
                     Spacer(Modifier.height(16.dp))
