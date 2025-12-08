@@ -18,6 +18,8 @@ HNS Go is an Android application that enables local resolution of Handshake doma
 
 This project is inspired by [hnsd](https://github.com/handshake-org/hnsd), the Handshake SPV resolver. We acknowledge the hnsd project contributors and their MIT License.
 
+Special thanks to Nathan and his [DANE checker](https://tools.cn02.woodburn.au/?domain=nathan.woodburn) tool, which provided valuable insights for implementing the DANE Inspector feature.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
