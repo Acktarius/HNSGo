@@ -2,7 +2,10 @@ package com.acktarius.hnsgo
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import com.acktarius.hnsgo.Config
 import org.xbill.DNS.AAAARecord
 import org.xbill.DNS.ARecord
 import org.xbill.DNS.CNAMERecord
@@ -55,7 +58,6 @@ object RecursiveResolver {
         name: String,
         type: Int
     ): org.xbill.DNS.Message? = withContext(Dispatchers.IO) {
-        Log.d("HNSGo", "RecursiveResolver: Resolving '$name' (type: $type)")
         
         // Extract TLD
         val tld = ResourceRecord.extractTLD(name)
@@ -65,7 +67,6 @@ object RecursiveResolver {
         // Note: SpvClient.resolve() already returns DNS records (converted by NameResolver)
         val dnsRecords = SpvClient.resolve(name) // This already extracts TLD internally and converts to DNS
         if (dnsRecords == null || dnsRecords.isEmpty()) {
-            Log.d("HNSGo", "RecursiveResolver: No blockchain records found for '$name'")
             return@withContext null
         }
         
@@ -76,17 +77,14 @@ object RecursiveResolver {
         
         // If this is a TLD query, return NS + GLUE records
         if (isTLDQuery) {
-            Log.d("HNSGo", "RecursiveResolver: TLD query - returning NS + GLUE records")
             return@withContext buildTLDResponse(name, type, nsRecords, glueARecords, glueAAAARecords)
         }
         
         // Step 2: For subdomain queries, follow NS records
         if (nsRecords.isEmpty()) {
-            Log.w("HNSGo", "RecursiveResolver: No NS records found for TLD '$tld'")
             return@withContext null
         }
         
-        Log.d("HNSGo", "RecursiveResolver: Subdomain query - following ${nsRecords.size} NS records")
         
         // Query nameservers for subdomain
         // Note: nsRecords validated above but not needed - we use GLUE records directly
@@ -99,9 +97,7 @@ object RecursiveResolver {
         )
         
         if (answer != null) {
-            Log.d("HNSGo", "RecursiveResolver: Successfully resolved '$name' from nameservers")
         } else {
-            Log.w("HNSGo", "RecursiveResolver: Failed to resolve '$name' from nameservers")
         }
         
         return@withContext answer
@@ -130,7 +126,6 @@ object RecursiveResolver {
             val nameserver = String(rec.data, Charsets.UTF_8).trim()
             val nsName = Name(nameserver, Name.root)
             response.addRecord(NSRecord(queryName, DClass.IN, ttl, nsName), Section.AUTHORITY)
-            Log.d("HNSGo", "RecursiveResolver: Added NS record: $nameserver")
         }
         
         // Add GLUE records (A/AAAA) to ADDITIONAL section
@@ -160,9 +155,7 @@ object RecursiveResolver {
                     val ip = glueData.substring(nullIndex + 1).trim()
                     try {
                         response.addRecord(ARecord(nsName, DClass.IN, ttl, InetAddress.getByName(ip)), Section.ADDITIONAL)
-                        Log.d("HNSGo", "RecursiveResolver: Added GLUE A: $ip for $nameserver (matched by name: $glueName)")
                     } catch (e: Exception) {
-                        Log.e("HNSGo", "RecursiveResolver: Error parsing GLUE A: $ip", e)
                     }
                 }
             }
@@ -188,9 +181,7 @@ object RecursiveResolver {
                         val ip = glueData.substring(nullIndex + 1).trim()
                         try {
                             response.addRecord(AAAARecord(nsName, DClass.IN, ttl, InetAddress.getByName(ip)), Section.ADDITIONAL)
-                            Log.d("HNSGo", "RecursiveResolver: Added GLUE AAAA: $ip for $nameserver (matched by name: $glueName)")
                         } catch (e: Exception) {
-                            Log.e("HNSGo", "RecursiveResolver: Error parsing GLUE AAAA: $ip", e)
                         }
                     }
                 }
@@ -216,10 +207,9 @@ object RecursiveResolver {
         glueARecords: List<com.acktarius.hnsgo.Record>,
         glueAAAARecords: List<com.acktarius.hnsgo.Record>,
         depth: Int
-    ): org.xbill.DNS.Message? = withContext(Dispatchers.IO) {
+    ): org.xbill.DNS.Message? {
         if (depth >= MAX_RECURSION_DEPTH) {
-            Log.w("HNSGo", "RecursiveResolver: Max recursion depth reached")
-            return@withContext null
+            return null
         }
         
         // Build nameserver IP list from GLUE records
@@ -257,13 +247,11 @@ object RecursiveResolver {
         }
         
         if (ipv4Addresses.isEmpty() && ipv6Addresses.isEmpty()) {
-            Log.w("HNSGo", "RecursiveResolver: No nameserver IPs available (no GLUE records)")
-            return@withContext null
+            return null
         }
         
-        Log.d("HNSGo", "RecursiveResolver: Querying ${ipv4Addresses.size} IPv4 + ${ipv6Addresses.size} IPv6 nameservers for '$name'")
         
-        // Try IPv4 nameservers first (faster, more reliable)
+        // Try IPv4 nameservers sequentially (reverted from parallel to avoid blocking issues)
         for (ip in ipv4Addresses) {
             try {
                 val answer = queryNameserver(name, type, ip)
@@ -274,19 +262,18 @@ object RecursiveResolver {
                         val recordTypes = answers.map { record ->
                             "${Type.string(record.type)}(${record.rdataToString()})"
                         }.joinToString(", ")
-                        Log.d("HNSGo", "RecursiveResolver: Got answer from $ip: ${answers.size} records [${recordTypes}]")
-                        return@withContext answer
+                        return answer
                     }
                 }
             } catch (e: Exception) {
-                Log.w("HNSGo", "RecursiveResolver: Error querying IPv4 nameserver $ip: ${e.message}")
                 continue
             }
         }
         
-        // If IPv4 failed, try IPv6 nameservers (slower, but may work if IPv4 unavailable)
+        // Only try IPv6 if ALL IPv4 nameservers failed (no answers from any)
+        // Skip IPv6 if device/network likely has no IPv6 connectivity (timeouts are common)
         if (ipv6Addresses.isNotEmpty()) {
-            Log.d("HNSGo", "RecursiveResolver: IPv4 nameservers failed, trying ${ipv6Addresses.size} IPv6 nameservers")
+            // Try IPv6 sequentially with shorter timeout to avoid long delays
             for (ip in ipv6Addresses) {
                 try {
                     val answer = queryNameserver(name, type, ip)
@@ -296,19 +283,16 @@ object RecursiveResolver {
                             val recordTypes = answers.map { record ->
                                 "${Type.string(record.type)}(${record.rdataToString()})"
                             }.joinToString(", ")
-                            Log.d("HNSGo", "RecursiveResolver: Got answer from IPv6 $ip: ${answers.size} records [${recordTypes}]")
-                            return@withContext answer
+                            return answer
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w("HNSGo", "RecursiveResolver: Error querying IPv6 nameserver $ip: ${e.message}")
                     continue
                 }
             }
         }
         
-        Log.w("HNSGo", "RecursiveResolver: All nameservers failed for '$name' (${ipv4Addresses.size} IPv4 + ${ipv6Addresses.size} IPv6)")
-        return@withContext null
+        return null
     }
     
     /**
@@ -342,7 +326,6 @@ object RecursiveResolver {
             val socketAddress = InetSocketAddress(address, DNS_PORT)
             val packet = DatagramPacket(queryBytes, queryBytes.size, socketAddress)
             
-            Log.d("HNSGo", "RecursiveResolver: Sending DNS query to $ip:$DNS_PORT for '$name'")
             socket.send(packet)
             
             // Receive response
@@ -353,20 +336,16 @@ object RecursiveResolver {
             val responseBytes = responsePacket.data.sliceArray(0 until responsePacket.length)
             val response = org.xbill.DNS.Message(responseBytes)
             
-            Log.d("HNSGo", "RecursiveResolver: Received response from $ip (rcode: ${response.rcode})")
             
             if (response.rcode == Rcode.NOERROR) {
                 return@withContext response
             } else {
-                Log.w("HNSGo", "RecursiveResolver: Nameserver returned rcode: ${response.rcode}")
                 return@withContext null
             }
             
         } catch (e: SocketTimeoutException) {
-            Log.w("HNSGo", "RecursiveResolver: Timeout querying nameserver $ip")
             return@withContext null
         } catch (e: Exception) {
-            Log.e("HNSGo", "RecursiveResolver: Error querying nameserver $ip", e)
             return@withContext null
         } finally {
             socket?.close()

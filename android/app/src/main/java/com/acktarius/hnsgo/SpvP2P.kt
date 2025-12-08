@@ -45,7 +45,7 @@ object SpvP2P {
      * 
      * Returns list of discovered peer addresses (host:port format)
      */
-    suspend fun discoverPeers(): List<String> = withContext(Dispatchers.IO) {
+    suspend fun discoverPeers(): List<String> = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         ConnectionManager.discoverPeers()
     }
     
@@ -53,7 +53,7 @@ object SpvP2P {
      * Record a successful peer connection for future use
      * Adds to hardcoded verified peers list and resets error count
      */
-    suspend fun recordSuccessfulPeer(peer: String) = withContext(Dispatchers.IO) {
+    suspend fun recordSuccessfulPeer(peer: String) = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         ConnectionManager.recordSuccessfulPeer(peer)
     }
     
@@ -71,7 +71,7 @@ object SpvP2P {
         chainHeight: Int = 0,
         headerChain: List<Header>? = null, // Optional: if provided, adjust root based on peer height
         maxPeers: Int = Int.MAX_VALUE
-    ): NameQueryResult = withContext(Dispatchers.IO) {
+    ): NameQueryResult = withContext(Config.NAME_QUERY_DISPATCHER) {
         val result = NameQuery.queryName(nameHash, nameRoot, chainHeight, headerChain, { discoverPeers() }, maxPeers)
         
         // Convert internal NameQueryResult to public SpvP2P.NameQueryResult

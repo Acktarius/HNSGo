@@ -38,7 +38,6 @@ object FullNodePeers {
      */
     suspend fun recordVerifiedFullNode(peer: String) = withContext(Dispatchers.IO) {
         if (verifiedFullNodes.add(peer)) {
-            Log.d("FullNodePeers", "Recorded verified full node: $peer (has NETWORK service flag)")
             saveVerifiedFullNodes()
         }
     }
@@ -153,7 +152,6 @@ object FullNodePeers {
                         peerErrors[peer] = count
                     }
                 }
-                Log.d("FullNodePeers", "Loaded error counts for ${peerErrors.size} full node peers")
             }
             
             // Load proof counts (successful proof responses)
@@ -168,7 +166,6 @@ object FullNodePeers {
                         peerProofs[peer] = count
                     }
                 }
-                Log.d("FullNodePeers", "Loaded proof counts for ${peerProofs.size} full node peers")
             }
             
             // Load verified full nodes (peers with NETWORK flag)
@@ -183,10 +180,8 @@ object FullNodePeers {
                         verifiedFullNodes.add(peer)
                     }
                 }
-                Log.d("FullNodePeers", "Loaded ${verifiedFullNodes.size} verified full nodes")
             }
         } catch (e: Exception) {
-            Log.e("FullNodePeers", "Error loading full node peer errors", e)
             peerErrors.clear()
             peerProofs.clear()
             verifiedFullNodes.clear()
@@ -229,9 +224,7 @@ object FullNodePeers {
             tempFile.writeBytes(data)
             tempFile.renameTo(peersFile)
             
-            Log.d("FullNodePeers", "Saved error counts for ${peerErrors.size} peers, proof counts for ${peerProofs.size} peers, verified ${verifiedFullNodes.size} full nodes")
         } catch (e: Exception) {
-            Log.e("FullNodePeers", "Error saving full node peer errors", e)
         }
     }
     
@@ -251,10 +244,8 @@ object FullNodePeers {
         val newCount = currentCount + 1
         peerErrors[peer] = newCount
         
-        Log.d("FullNodePeers", "Recorded error for full node $peer (count: $newCount/$MAX_ERRORS)")
         
         if (newCount >= MAX_ERRORS) {
-            Log.w("FullNodePeers", "Full node $peer has exceeded max errors ($MAX_ERRORS), will be excluded")
         }
         
         saveErrors()
@@ -265,7 +256,6 @@ object FullNodePeers {
      */
     suspend fun resetErrors(peer: String) = withContext(Dispatchers.IO) {
         if (peerErrors.remove(peer) != null) {
-            Log.d("FullNodePeers", "Reset error count for full node $peer (query successful)")
             saveErrors()
         }
     }
@@ -279,7 +269,6 @@ object FullNodePeers {
         val newCount = currentCount + 1
         peerProofs[peer] = newCount
         
-        Log.d("FullNodePeers", "Recorded proof success for full node $peer (count: $newCount)")
         
         // Also reset error count on proof success
         resetErrors(peer)
@@ -418,7 +407,6 @@ object FullNodePeers {
         
         if (filtered.isEmpty() && peers.isNotEmpty()) {
             // All peers are excluded - reset all error counts to prevent total blacklist
-            Log.w("FullNodePeers", "All ${peers.size} full node peers are excluded (error count >= $MAX_ERRORS). Resetting error counts to allow retry.")
             peerErrors.clear()
             saveErrors() // Persist the reset
             return@withContext peers
@@ -426,7 +414,6 @@ object FullNodePeers {
         
         if (filtered.size < peers.size) {
             val excludedCount = peers.size - filtered.size
-            Log.d("FullNodePeers", "Filtered out $excludedCount excluded peers (${filtered.size} remaining)")
         }
         
         return@withContext filtered

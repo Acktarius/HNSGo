@@ -1,9 +1,75 @@
 package com.acktarius.hnsgo
 
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executors
+
 /**
  * Application configuration constants
  */
 object Config {
+    // Dedicated Thread Dispatchers Configuration
+    // Strategy: Single-thread for strict ordering (header sync), small pools for high-fan-out operations
+    // 
+    // Benefits:
+    // - Sequential execution per domain simplifies state management and avoids race conditions
+    // - Clear thread names make logs and thread dumps easier to interpret
+    // - Configurable thread counts allow tuning per environment without code changes
+    //
+    // Trade-offs:
+    // - Single-threaded domains can become bottlenecks under high load
+    // - Fixed pools may under-utilize shared Dispatchers.IO/Default pools
+    // - Best for correctness-first design; can be optimized later based on profiling
+    
+    // Thread pool sizes (configurable per environment)
+    // Adjust these based on profiling and load characteristics
+    const val HEADER_SYNC_THREADS = 1  // Single thread for strict ordering (sequential header sync)
+    const val NAME_QUERY_THREADS = 3  // Small pool for concurrent name queries (2-4 threads recommended)
+    const val PEER_DISCOVERY_THREADS = 2  // Small pool for peer discovery operations (2-4 threads recommended)
+    
+    // Thread counters for naming
+    private val headerSyncThreadCounter = java.util.concurrent.atomic.AtomicInteger(0)
+    private val nameQueryThreadCounter = java.util.concurrent.atomic.AtomicInteger(0)
+    private val peerDiscoveryThreadCounter = java.util.concurrent.atomic.AtomicInteger(0)
+    
+    /**
+     * Header Sync Dispatcher
+     * Single-threaded for strict ordering - header sync must be sequential to maintain chain integrity
+     * This ensures headers are processed in order and avoids race conditions in chain state
+     */
+    val HEADER_SYNC_DISPATCHER: ExecutorCoroutineDispatcher by lazy {
+        Executors.newFixedThreadPool(HEADER_SYNC_THREADS) { r ->
+            Thread(r, "HNS-HeaderSync-${headerSyncThreadCounter.incrementAndGet()}").apply {
+                isDaemon = true
+            }
+        }.asCoroutineDispatcher()
+    }
+    
+    /**
+     * Name Query Dispatcher
+     * Small fixed pool for concurrent DNS name resolution queries to P2P peers
+     * Allows multiple queries to run in parallel while maintaining isolation from other subsystems
+     */
+    val NAME_QUERY_DISPATCHER: ExecutorCoroutineDispatcher by lazy {
+        Executors.newFixedThreadPool(NAME_QUERY_THREADS) { r ->
+            Thread(r, "HNS-NameQuery-${nameQueryThreadCounter.incrementAndGet()}").apply {
+                isDaemon = true
+            }
+        }.asCoroutineDispatcher()
+    }
+    
+    /**
+     * Peer Discovery Dispatcher
+     * Small fixed pool for peer discovery and connection management operations
+     * Allows concurrent peer discovery operations while maintaining isolation
+     */
+    val PEER_DISCOVERY_DISPATCHER: ExecutorCoroutineDispatcher by lazy {
+        Executors.newFixedThreadPool(PEER_DISCOVERY_THREADS) { r ->
+            Thread(r, "HNS-PeerDiscovery-${peerDiscoveryThreadCounter.incrementAndGet()}").apply {
+                isDaemon = true
+            }
+        }.asCoroutineDispatcher()
+    }
     // DEBUG: External resolver for development/testing only (not production)
     // Set these only during development for testing - app should be autonomous in production
     const val DEBUG_RESOLVER_HOST = "127.0.0.1"  // Debug host (localhost only - change during dev if needed)
@@ -61,9 +127,12 @@ object Config {
     const val P2P_MAX_RETRIES = 3  // Max retries per seed node
     const val P2P_RETRY_BASE_DELAY_MS = 1000L  // Base delay for exponential backoff (1 second)
     
-    // Parallel Peer Connection Configuration (Rolling Cadence)
-    const val RESERVED_THREADS = 4  // Reserve threads for other work (hash computation, I/O, etc.)
-    const val MAX_PARALLEL_PEER_CONNECTIONS = 3  // Max parallel peer connections for header fetching pipeline
+    // DNS Resolution Configuration
+    const val HANDSHAKE_RESOLUTION_TIMEOUT_MS = 15000L  // Timeout for Handshake domain resolution (15 seconds)
+    
+    // Note: RESERVED_THREADS and MAX_PARALLEL_PEER_CONNECTIONS removed
+    // We now use 3 dedicated thread dispatchers (HEADER_SYNC_DISPATCHER, NAME_QUERY_DISPATCHER, PEER_DISCOVERY_DISPATCHER)
+    // Each dispatcher has 1 dedicated thread to avoid thread competition
     
     // DHT (Kademlia) Configuration
     const val DHT_PORT = 12038  // UDP port for DHT (same as P2P TCP port)

@@ -35,32 +35,26 @@ object NameResolver {
         headerChain: List<Header>,
         chainHeight: Int
     ): List<com.acktarius.hnsgo.Record>? = withContext(Dispatchers.IO) {
-        android.util.Log.d("HNSGo", "NameResolver: Resolving Handshake domain: $name")
         
         val tld = ResourceRecord.extractTLD(name)
-        android.util.Log.d("HNSGo", "NameResolver: Resolving domain '$name' -> TLD: '$tld'")
         
         // Check blacklist (matching hnsd ns.c:475-503)
         // Blacklisted TLDs are reserved for other naming systems and should return NXDOMAIN
         if (Config.BLACKLISTED_TLDS.contains(tld.lowercase())) {
-            android.util.Log.d("HNSGo", "NameResolver: TLD '$tld' is blacklisted (reserved for other naming systems)")
             return@withContext null
         }
         
         val minRequiredHeight = Config.CHECKPOINT_HEIGHT + 1000
         if (chainHeight < minRequiredHeight) {
-            android.util.Log.w("HNSGo", "NameResolver: Not enough headers synced (height: $chainHeight, required: $minRequiredHeight)")
         }
         
         // Use (qname, qtype, qclass) as cache key - for TLD proof cache, use DClass.IN
         val cached = CacheManager.get(tld, 1, org.xbill.DNS.DClass.IN)
         if (cached != null) {
-            android.util.Log.d("HNSGo", "NameResolver: Found cached record for TLD '$tld'")
             // Parse cached Handshake records and convert to DNS format (matching fresh query behavior)
             val cachedHandshakeRecords = parseRecords(cached)
             if (cachedHandshakeRecords.isNotEmpty()) {
                 val cachedDnsRecords = ResourceRecord.convertHandshakeRecordsToDNS(cachedHandshakeRecords)
-                android.util.Log.d("HNSGo", "NameResolver: Retrieved ${cachedDnsRecords.size} DNS records from cache for '$name'")
                 return@withContext cachedDnsRecords
             }
         }
@@ -68,27 +62,17 @@ object NameResolver {
         if (chainHeight >= minRequiredHeight) {
             val tldHash = computeNameHash(tld)
             val tldHashHex = tldHash.joinToString("") { "%02x".format(it) }
-            android.util.Log.w("HNSGo", "NameResolver: ========== QUERYING BLOCKCHAIN ==========")
-            android.util.Log.w("HNSGo", "NameResolver: Full domain: '$name'")
-            android.util.Log.w("HNSGo", "NameResolver: Extracted TLD: '$tld'")
-            android.util.Log.w("HNSGo", "NameResolver: TLD hash (SHA3-256): $tldHashHex")
-            android.util.Log.w("HNSGo", "NameResolver: ======================================")
-            android.util.Log.d("HNSGo", "NameResolver: Querying blockchain for TLD '$tld' (hash: $tldHashHex)")
             val blockchainRecords = resolveFromBlockchain(tld, tldHash, headerChain, chainHeight)
             if (blockchainRecords != null && blockchainRecords.isNotEmpty()) {
-                android.util.Log.d("HNSGo", "NameResolver: Successfully resolved TLD '$tld' from blockchain: ${blockchainRecords.size} records")
                 val dnsRecords = ResourceRecord.convertHandshakeRecordsToDNS(blockchainRecords)
                 if (dnsRecords.isNotEmpty()) {
-                    android.util.Log.d("HNSGo", "NameResolver: Converted to ${dnsRecords.size} DNS records for '$name'")
                     val proofData = convertRecordsToProof(blockchainRecords, tld)
                     // Use (qname, qtype, qclass) as cache key - for TLD proof cache, use DClass.IN
                     CacheManager.put(tld, 1, org.xbill.DNS.DClass.IN, proofData, Config.DNS_CACHE_TTL_SECONDS)
-                    android.util.Log.d("HNSGo", "NameResolver: Cached TLD '$tld' for ${Config.DNS_CACHE_TTL_SECONDS} seconds (6 hours)")
                     return@withContext dnsRecords
                 }
             }
         } else {
-            android.util.Log.w("HNSGo", "NameResolver: Skipping blockchain resolution - not enough headers synced yet (height: $chainHeight)")
         }
         
         null
@@ -100,25 +84,20 @@ object NameResolver {
         headerChain: List<Header>,
         chainHeight: Int
     ): List<com.acktarius.hnsgo.Record>? = withContext(Dispatchers.IO) {
-        android.util.Log.d("HNSGo", "NameResolver: Resolving $name from blockchain")
         
         if (headerChain.isEmpty()) {
-            android.util.Log.w("HNSGo", "NameResolver: No headers synced, cannot resolve from blockchain")
             return@withContext null
         }
         
         val latestHeader = headerChain.lastOrNull()
         if (latestHeader == null) {
-            android.util.Log.w("HNSGo", "NameResolver: No headers available")
             return@withContext null
         }
         
-        android.util.Log.d("HNSGo", "NameResolver: Latest header height: $chainHeight")
         
         // Log last 10 headers for debugging
         val firstHeaderHeight = chainHeight - headerChain.size + 1
         val lastHeaders = headerChain.takeLast(10)
-        android.util.Log.w("HNSGo", "NameResolver: Last 10 headers in chain:")
         lastHeaders.forEachIndexed { index, header ->
             val headerHeight = firstHeaderHeight + (headerChain.size - lastHeaders.size + index)
             val rootHex = header.nameRoot.joinToString("") { "%02x".format(it) }
@@ -128,18 +107,15 @@ object NameResolver {
         // hnsd pool.c:521: const uint8_t *root = hsk_chain_safe_root(&pool->chain);
         val interval = Config.TREE_INTERVAL
         var mod = chainHeight % interval
-        android.util.Log.w("HNSGo", "NameResolver: chainHeight=$chainHeight, mod=$mod")
         
         // If there's enough proof-of-work on top of the most recent root, it should be safe to use it
         // EXACT MATCH to hnsd chain.c:197-198
         if (mod >= 12) {
             mod = 0
-            android.util.Log.w("HNSGo", "NameResolver: mod >= 12, setting mod=0")
         }
         
         // EXACT MATCH to hnsd chain.c:200: uint32_t height = (uint32_t)chain->height - mod;
         val rootHeight = chainHeight - mod
-        android.util.Log.w("HNSGo", "NameResolver: Calculated rootHeight=$rootHeight (chainHeight=$chainHeight - mod=$mod)")
         
         // Check if tip root is different from committed interval root
         // If root changed at tip, peers may have indexed the new root
@@ -148,12 +124,9 @@ object NameResolver {
         
         val tipRootHex = tipRoot.joinToString("") { "%02x".format(it) }
         val committedRootHex = committedRoot?.joinToString("") { "%02x".format(it) } ?: "null"
-        android.util.Log.w("HNSGo", "NameResolver: Tip root (height $chainHeight): $tipRootHex")
-        android.util.Log.w("HNSGo", "NameResolver: Committed root (height $rootHeight): $committedRootHex")
         
         // If tip root is different from committed root, use tip root (peers have indexed it)
         val finalRootHeight = if (committedRoot != null && !tipRoot.contentEquals(committedRoot)) {
-            android.util.Log.w("HNSGo", "NameResolver: Root changed at tip, using tip root (height $chainHeight)")
             chainHeight
         } else {
             rootHeight
@@ -161,18 +134,15 @@ object NameResolver {
         
         // Verify header chain has the header at finalRootHeight
         if (finalRootHeight < firstHeaderHeight || finalRootHeight > chainHeight) {
-            android.util.Log.e("HNSGo", "NameResolver: Header chain missing header at height $finalRootHeight (range: $firstHeaderHeight to $chainHeight, size: ${headerChain.size})")
             return@withContext null
         }
         
         val safeRoot = getSafeRootAtHeight(headerChain, chainHeight, finalRootHeight)
         if (safeRoot == null) {
-            android.util.Log.w("HNSGo", "NameResolver: Could not determine safe root")
             return@withContext null
         }
         
         val rootHex = safeRoot.joinToString("") { "%02x".format(it) }
-        android.util.Log.w("HNSGo", "NameResolver: Using root from height $finalRootHeight (chainHeight=$chainHeight, mod=$mod, headerRange=$firstHeaderHeight-$chainHeight): $rootHex")
         
         try {
             // Query with safe root - ConnectionManager will handshake first, get peer height,
@@ -184,10 +154,8 @@ object NameResolver {
             when (finalResult) {
                 is SpvP2P.NameQueryResult.Success -> {
                     val proof = finalResult.proof
-                    android.util.Log.d("HNSGo", "NameResolver: P2P query success (proof: ${proof != null})")
                     
                     if (proof == null) {
-                        android.util.Log.w("HNSGo", "NameResolver: No proof in response")
                         return@withContext null
                     }
                     
@@ -197,31 +165,24 @@ object NameResolver {
                     // Use Proof.kt to verify proof (matching hnsd's hsk_proof_verify)
                     val parsedProof = Proof.parseProof(proof)
                     if (parsedProof != null) {
-                        android.util.Log.d("HNSGo", "NameResolver: Parsed proof (type: ${parsedProof.type}, depth: ${parsedProof.depth}, nodes: ${parsedProof.nodes.size})")
                         val verifyResult = Proof.verifyProof(verifiedRoot, nameHash, parsedProof)
                         
                         if (verifyResult.success && verifyResult.exists && verifyResult.data != null) {
                             // Parse resource records from proof data (extracted from name state)
                             val records = parseResourceRecordsFromProof(verifyResult.data)
                             if (records.isNotEmpty()) {
-                                android.util.Log.d("HNSGo", "NameResolver: Successfully resolved $name from blockchain: ${records.size} records")
                                 return@withContext records
                             } else {
-                                android.util.Log.w("HNSGo", "NameResolver: No resource records found in proof data")
                             }
                         } else if (verifyResult.success && !verifyResult.exists) {
-                            android.util.Log.d("HNSGo", "NameResolver: Proof verified but domain does not exist (DEADEND)")
                             return@withContext null
                         } else {
-                            android.util.Log.w("HNSGo", "NameResolver: Proof verification failed (error code: ${verifyResult.errorCode})")
                         }
                     } else {
-                        android.util.Log.w("HNSGo", "NameResolver: Failed to parse proof")
                     }
                 }
                 is SpvP2P.NameQueryResult.NotFound -> {
                     // Bounded fallback: try previous committed interval root (max 2 attempts)
-                    android.util.Log.d("HNSGo", "NameResolver: notfound, trying previous interval root")
                     val treeInterval = Config.TREE_INTERVAL
                     val currentMod = chainHeight % treeInterval
                     val currentCommittedHeight = chainHeight - currentMod
@@ -230,7 +191,6 @@ object NameResolver {
                     if (previousCommittedHeight >= 0) {
                         val previousRoot = getSafeRootAtHeight(headerChain, chainHeight, previousCommittedHeight)
                         if (previousRoot != null) {
-                            android.util.Log.d("HNSGo", "NameResolver: Trying previous interval (height: $previousCommittedHeight)")
                             val fallbackResult = SpvP2P.queryName(nameHash, previousRoot, chainHeight, headerChain)
                             
                             if (fallbackResult is SpvP2P.NameQueryResult.Success) {
@@ -242,7 +202,6 @@ object NameResolver {
                                         if (verifyResult.success && verifyResult.exists && verifyResult.data != null) {
                                             val records = parseResourceRecordsFromProof(verifyResult.data)
                                             if (records.isNotEmpty()) {
-                                                android.util.Log.d("HNSGo", "NameResolver: Resolved with previous interval root")
                                                 return@withContext records
                                             }
                                         }
@@ -254,11 +213,9 @@ object NameResolver {
                     return@withContext null
                 }
                 is SpvP2P.NameQueryResult.Error -> {
-                    android.util.Log.w("HNSGo", "NameResolver: Error querying name from P2P peers")
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("HNSGo", "NameResolver: Exception during P2P name query", e)
         }
         
         null
@@ -285,7 +242,6 @@ object NameResolver {
         val interval = Config.TREE_INTERVAL  // 36 blocks on mainnet
         val mod = peerHeight % interval
         
-        android.util.Log.d("HNSGo", "NameResolver: getSafeRootForPeer - peerHeight=$peerHeight, mod=$mod")
         
         // Always use the last committed interval (don't use current tip even if mod >= 12)
         // The current tip root might not be indexed yet by the peer
@@ -295,13 +251,11 @@ object NameResolver {
         // to ensure the peer has definitely indexed it
         val rootHeight = if (mod == 0) {
             val previousIntervalHeight = committedHeight - interval
-            android.util.Log.d("HNSGo", "NameResolver: getSafeRootForPeer - peerHeight is on interval boundary, using previous interval: $previousIntervalHeight")
             previousIntervalHeight
         } else {
             committedHeight
         }
         
-        android.util.Log.d("HNSGo", "NameResolver: getSafeRootForPeer - calculated rootHeight=$rootHeight (using committed interval root for peer queries)")
         
         // Get root from the committed interval (guaranteed to be indexed by peer)
         return getSafeRootAtHeight(headerChain, ourChainHeight, rootHeight)
@@ -320,18 +274,15 @@ object NameResolver {
         val interval = Config.TREE_INTERVAL  // 36 blocks on mainnet
         var mod = heightToUse % interval
         
-        android.util.Log.d("HNSGo", "NameResolver: getSafeRoot - chainHeight=$chainHeight, targetHeight=$targetHeight, heightToUse=$heightToUse, interval=$interval, mod=$mod")
         
         // If there's enough proof-of-work on top of the most recent root,
         // it should be safe to use it.
         // EXACT MATCH to hnsd chain.c:197-198
         if (mod >= 12) {
             mod = 0
-            android.util.Log.d("HNSGo", "NameResolver: getSafeRoot - mod >= 12, setting mod=0")
         }
         
         val safeHeight = heightToUse - mod
-        android.util.Log.d("HNSGo", "NameResolver: getSafeRoot - calculated safeHeight=$safeHeight (heightToUse=$heightToUse - mod=$mod)")
         
         // hnsd does NOT subtract an interval - it uses the safe height directly
         // hnsd chain.c:200: uint32_t height = (uint32_t)chain->height - mod;
@@ -363,19 +314,15 @@ object NameResolver {
             if (index >= 0 && index < headerChain.size) {
                 val header = headerChain[index]
                 val rootHex = header.nameRoot.joinToString("") { "%02x".format(it) }
-                android.util.Log.d("HNSGo", "NameResolver: Using root from header at height $targetHeight: $rootHex")
                 header
             } else {
-                android.util.Log.w("HNSGo", "NameResolver: Index calculation error (index=$index, size=${headerChain.size})")
                 null
             }
         } else {
-            android.util.Log.w("HNSGo", "NameResolver: Target height $targetHeight is beyond available headers (first: $firstHeaderHeight, last: $chainHeight)")
             null
         }
         
         if (safeHeader == null) {
-            android.util.Log.e("HNSGo", "NameResolver: getSafeRootAtHeight - safeHeader is null!")
             return null
         }
         
@@ -388,13 +335,11 @@ object NameResolver {
         // hsk_hash_name(name, hash) -> hsk_hash_sha3((uint8_t *)name, strlen(name), hash)
         // NOTE: This should be the TLD only (e.g., "conceal", not "website.conceal")
         val nameBytes = name.toByteArray(Charsets.UTF_8)
-        android.util.Log.d("HNSGo", "NameResolver: computeNameHash - Hashing name: '$name' (${nameBytes.size} bytes, UTF-8)")
         sha3_256.reset()
         sha3_256.update(nameBytes, 0, nameBytes.size)
         val hash = ByteArray(32)
         sha3_256.doFinal(hash, 0)
         val hashHex = hash.joinToString("") { "%02x".format(it) }
-        android.util.Log.d("HNSGo", "NameResolver: computeNameHash - Computed SHA3-256 hash for '$name': $hashHex")
         return hash
     }
     
@@ -474,11 +419,9 @@ object NameResolver {
                             records.add(hnsRecord)
                         }
                     } catch (e2: Exception) {
-                        android.util.Log.e("HNSGo", "NameResolver: Failed to parse resource record", e2)
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("HNSGo", "NameResolver: Error parsing resource record", e)
             }
         }
         
@@ -510,45 +453,36 @@ object NameResolver {
         proof: ByteArray?,
         nameRoot: ByteArray
     ): Boolean {
-        android.util.Log.d("HNSGo", "NameResolver: Verifying domain proof")
         
         if (proof == null) {
-            android.util.Log.w("HNSGo", "NameResolver: No proof provided for verification")
             return false
         }
         
         if (nameHash.size != 32 || nameRoot.size != 32) {
-            android.util.Log.w("HNSGo", "NameResolver: Invalid hash size")
             return false
         }
         
         try {
             val proofNodes = parseMerkleProof(proof)
             if (proofNodes.isEmpty()) {
-                android.util.Log.w("HNSGo", "NameResolver: Failed to parse Merkle proof")
                 return false
             }
             
-            android.util.Log.d("HNSGo", "NameResolver: Parsed ${proofNodes.size} Merkle proof nodes")
             
             val calculatedRoot = reconstructMerkleRoot(nameHash, records, proofNodes)
             
             if (calculatedRoot == null) {
-                android.util.Log.w("HNSGo", "NameResolver: Failed to reconstruct Merkle root")
                 return false
             }
             
             val isValid = calculatedRoot.contentEquals(nameRoot)
             
             if (isValid) {
-                android.util.Log.d("HNSGo", "NameResolver: Domain proof verified successfully")
             } else {
-                android.util.Log.w("HNSGo", "NameResolver: Domain proof verification failed - root mismatch")
             }
             
             return isValid
         } catch (e: Exception) {
-            android.util.Log.e("HNSGo", "NameResolver: Error verifying domain proof", e)
             return false
         }
     }
@@ -569,7 +503,6 @@ object NameResolver {
                     }
                 }
                 if (nodes.isNotEmpty()) {
-                    android.util.Log.d("HNSGo", "NameResolver: Parsed ${nodes.size} proof nodes from CBOR")
                     return nodes
                 }
             } catch (e: Exception) {
@@ -594,12 +527,10 @@ object NameResolver {
                     }
                 }
                 if (nodes.isNotEmpty()) {
-                    android.util.Log.d("HNSGo", "NameResolver: Parsed ${nodes.size} proof nodes from binary format")
                     return nodes
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w("HNSGo", "NameResolver: Error parsing binary proof format", e)
         }
         
         if (proof.size == 32) {
@@ -614,7 +545,6 @@ object NameResolver {
             return nodes
         }
         
-        android.util.Log.w("HNSGo", "NameResolver: Could not parse proof in any format (size: ${proof.size})")
         return emptyList()
     }
     
@@ -635,7 +565,6 @@ object NameResolver {
             
             for ((index, proofNode) in proofNodes.withIndex()) {
                 if (proofNode.size != 32) {
-                    android.util.Log.w("HNSGo", "NameResolver: Invalid proof node size at index $index: ${proofNode.size}")
                     return null
                 }
                 
@@ -657,7 +586,6 @@ object NameResolver {
             
             return currentHash
         } catch (e: Exception) {
-            android.util.Log.e("HNSGo", "NameResolver: Error reconstructing Merkle root", e)
             return null
         }
     }
@@ -764,12 +692,10 @@ object NameResolver {
                         com.acktarius.hnsgo.Config.HSK_GLUE6 -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_GLUE6, dataBytes))
                         com.acktarius.hnsgo.Config.HSK_TEXT -> records.add(com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_TEXT, dataBytes))
                         else -> {
-                            android.util.Log.w("HNSGo", "NameResolver: Unknown cached record type: $type")
                         }
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("HNSGo", "NameResolver: Error parsing cached records", e)
             }
         }
         return records

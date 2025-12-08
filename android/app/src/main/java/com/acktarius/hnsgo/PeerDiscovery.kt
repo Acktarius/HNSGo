@@ -126,16 +126,14 @@ class PeerDiscovery {
     /**
      * Initialize peer discovery
      */
-    suspend fun init() = withContext(Dispatchers.IO) {
+    suspend fun init() = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         if (isRunning) {
-            Log.w("PeerDiscovery", "Already initialized")
             return@withContext
         }
         
         try {
             // Generate random node ID
             nodeId = generateNodeId()
-            Log.d("PeerDiscovery", "Generated node ID: ${nodeId?.joinToString("") { "%02x".format(it) }?.take(16)}...")
             
             // Create UDP socket for DHT
             socket = DatagramSocket().apply {
@@ -149,15 +147,13 @@ class PeerDiscovery {
             }
             
             // Start receiver coroutine
-            discoveryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            discoveryScope = CoroutineScope(Config.PEER_DISCOVERY_DISPATCHER + SupervisorJob())
             discoveryScope?.launch {
                 receiveLoop()
             }
             
             isRunning = true
-            Log.d("PeerDiscovery", "Peer discovery initialized on port $DHT_PORT")
         } catch (e: Exception) {
-            Log.e("PeerDiscovery", "Failed to initialize peer discovery", e)
             throw e
         }
     }
@@ -165,12 +161,11 @@ class PeerDiscovery {
     /**
      * Start peer discovery with bootstrap nodes
      */
-    suspend fun startDiscovery(bootstrapNodes: List<String>): List<PeerNode> = withContext(Dispatchers.IO) {
+    suspend fun startDiscovery(bootstrapNodes: List<String>): List<PeerNode> = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         if (!isRunning) {
             init()
         }
         
-        Log.d("PeerDiscovery", "Starting peer discovery with ${bootstrapNodes.size} bootstrap nodes")
         
         // Add bootstrap nodes to routing table
         val bootstrapPeers = mutableListOf<PeerNode>()
@@ -186,9 +181,7 @@ class PeerDiscovery {
                 addToRoutingTable(peer)
                 bootstrapPeers.add(peer)
                 
-                Log.d("PeerDiscovery", "Added bootstrap node: $host:$port")
             } catch (e: Exception) {
-                Log.w("PeerDiscovery", "Failed to parse bootstrap node: $seed", e)
             }
         }
         
@@ -210,14 +203,11 @@ class PeerDiscovery {
                         if (!discoveredPeers.contains(neighbor)) {
                             addToRoutingTable(neighbor)
                             discoveredPeers.add(neighbor)
-                            Log.d("PeerDiscovery", "Discovered peer via DHT: ${neighbor.address.hostString}:${neighbor.address.port}")
                         }
                     }
                 } else {
-                    Log.d("PeerDiscovery", "Bootstrap node ${bootstrap.address} did not respond to DHT query (may not support DHT or is unreachable)")
                 }
             } catch (e: Exception) {
-                Log.d("PeerDiscovery", "DHT query failed for bootstrap node ${bootstrap.address}: ${e.message}")
             }
         }
         
@@ -233,26 +223,21 @@ class PeerDiscovery {
                         if (!discoveredPeers.contains(peer)) {
                             addToRoutingTable(peer)
                             discoveredPeers.add(peer)
-                            Log.d("PeerDiscovery", "Discovered peer via iterative lookup: ${peer.address.hostString}:${peer.address.port}")
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.d("PeerDiscovery", "Iterative lookup failed: ${e.message}")
             }
         } else {
-            Log.d("PeerDiscovery", "No DHT responses received - bootstrap nodes may not support DHT or are unreachable")
-            Log.d("PeerDiscovery", "Will use bootstrap nodes directly for TCP P2P connections")
         }
         
-        Log.d("PeerDiscovery", "Peer discovery complete: found ${discoveredPeers.size} peers (${bootstrapPeers.size} bootstrap + ${discoveredPeers.size - bootstrapPeers.size} discovered)")
         return@withContext discoveredPeers
     }
     
     /**
      * Find nodes close to target ID using iterative lookup
      */
-    private suspend fun iterativeLookup(targetId: ByteArray): List<PeerNode> = withContext(Dispatchers.IO) {
+    private suspend fun iterativeLookup(targetId: ByteArray): List<PeerNode> = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         val closestNodes = mutableListOf<PeerNode>()
         val queriedNodes = mutableSetOf<String>()
         val candidates = mutableListOf<PeerNode>()
@@ -277,7 +262,6 @@ class PeerDiscovery {
                         queriedNodes.add(node.address.toString())
                         findNode(node, targetId)
                     } catch (e: Exception) {
-                        Log.d("PeerDiscovery", "Query failed for ${node.address}: ${e.message}")
                         emptyList()
                     }
                 }
@@ -304,7 +288,7 @@ class PeerDiscovery {
     /**
      * Find nodes close to target ID from a specific node
      */
-    private suspend fun findNode(from: PeerNode, targetId: ByteArray): List<PeerNode> = withContext(Dispatchers.IO) {
+    private suspend fun findNode(from: PeerNode, targetId: ByteArray): List<PeerNode> = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         try {
             val requestId = requestIdCounter.incrementAndGet()
             val deferred = CompletableDeferred<DHTResponse>()
@@ -326,11 +310,9 @@ class PeerDiscovery {
                 from.lastSeen = System.currentTimeMillis()
                 return@withContext response.nodes
             } else {
-                Log.d("PeerDiscovery", "Timeout waiting for response from ${from.address}")
                 return@withContext emptyList()
             }
         } catch (e: Exception) {
-            Log.w("PeerDiscovery", "Error finding nodes from ${from.address}", e)
             pendingRequests.remove(requestIdCounter.get())
             return@withContext emptyList()
         }
@@ -339,7 +321,7 @@ class PeerDiscovery {
     /**
      * Ping a node to check if it's alive
      */
-    suspend fun ping(node: PeerNode): Boolean = withContext(Dispatchers.IO) {
+    suspend fun ping(node: PeerNode): Boolean = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         try {
             val requestId = requestIdCounter.incrementAndGet()
             val deferred = CompletableDeferred<DHTResponse>()
@@ -362,7 +344,6 @@ class PeerDiscovery {
             
             return@withContext false
         } catch (e: Exception) {
-            Log.d("PeerDiscovery", "Ping failed for ${node.address}: ${e.message}")
             return@withContext false
         }
     }
@@ -422,7 +403,7 @@ class PeerDiscovery {
             // Bucket is full, ping oldest node
             val oldest = bucket.minByOrNull { it.lastPing }
             if (oldest != null) {
-                CoroutineScope(Dispatchers.IO).launch {
+                CoroutineScope(Config.PEER_DISCOVERY_DISPATCHER).launch {
                     if (!ping(oldest)) {
                         // Remove oldest and add new node
                         bucket.remove(oldest)
@@ -469,7 +450,7 @@ class PeerDiscovery {
     /**
      * Send DHT message via UDP
      */
-    private suspend fun sendDHTMessage(address: InetSocketAddress, message: DHTMessage) = withContext(Dispatchers.IO) {
+    private suspend fun sendDHTMessage(address: InetSocketAddress, message: DHTMessage) = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         val socket = this@PeerDiscovery.socket ?: return@withContext
         
         try {
@@ -477,16 +458,14 @@ class PeerDiscovery {
             val packet = DatagramPacket(payload, payload.size, address)
             socket.send(packet)
             
-            Log.d("PeerDiscovery", "Sent ${message.type} to ${address.hostString}:${address.port}")
         } catch (e: Exception) {
-            Log.e("PeerDiscovery", "Failed to send DHT message to ${address}", e)
         }
     }
     
     /**
      * Receive loop for DHT messages
      */
-    private suspend fun receiveLoop() = withContext(Dispatchers.IO) {
+    private suspend fun receiveLoop() = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         val socket = this@PeerDiscovery.socket ?: return@withContext
         val buffer = ByteArray(8192)
         
@@ -504,7 +483,6 @@ class PeerDiscovery {
                 continue
             } catch (e: Exception) {
                 if (isRunning) {
-                    Log.e("PeerDiscovery", "Error receiving DHT message", e)
                 }
             }
         }
@@ -513,7 +491,7 @@ class PeerDiscovery {
     /**
      * Handle incoming DHT message
      */
-    private suspend fun handleDHTMessage(address: InetAddress, port: Int, message: DHTMessage) = withContext(Dispatchers.IO) {
+    private suspend fun handleDHTMessage(address: InetAddress, port: Int, message: DHTMessage) = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         when (message.type) {
             DHTMessageType.PING -> {
                 // Respond with PONG
@@ -547,7 +525,6 @@ class PeerDiscovery {
             }
             
             else -> {
-                Log.d("PeerDiscovery", "Unhandled DHT message type: ${message.type}")
             }
         }
     }
@@ -648,7 +625,6 @@ class PeerDiscovery {
             
             return DHTMessage(type, requestId, target, nodes, peers)
         } catch (e: Exception) {
-            Log.e("PeerDiscovery", "Error deserializing DHT message", e)
             return null
         }
     }
@@ -734,7 +710,7 @@ class PeerDiscovery {
     /**
      * Discover peers via DNS seeds (fallback method)
      */
-    suspend fun discoverPeersFromDNS(): List<String> = withContext(Dispatchers.IO) {
+    suspend fun discoverPeersFromDNS(): List<String> = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         // TODO: Implement DNS seed discovery similar to Bitcoin
         // Handshake may have DNS seeds like:
         // - seed.handshake.org
@@ -753,7 +729,6 @@ class PeerDiscovery {
         routingTable.clear()
         knownPeers.clear()
         pendingRequests.clear()
-        Log.d("PeerDiscovery", "Peer discovery shut down")
     }
     
     // Helper functions for binary serialization

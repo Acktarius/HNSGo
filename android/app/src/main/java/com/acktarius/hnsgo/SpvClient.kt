@@ -55,7 +55,6 @@ object SpvClient {
     fun setResolver(host: String, port: Int = Config.DEBUG_RESOLVER_PORT) {
         resolverHost = host
         resolverPort = port
-        android.util.Log.d("HNSGo", "SpvClient: [DEV] External resolver set to $host:$port (development only)")
     }
     
     /**
@@ -69,11 +68,9 @@ object SpvClient {
     fun getNetworkHeight(): Int? = lastNetworkHeight
     
     private suspend fun loadCheckpointBootstrap() {
-        android.util.Log.d("HNSGo", "SpvClient: No headers found, attempting checkpoint bootstrap...")
         val checkpointHeight = Checkpoint.loadCheckpoint(headerChain, chainHeight)
         chainHeight = checkpointHeight
         if (headerChain.isNotEmpty()) {
-            android.util.Log.d("HNSGo", "SpvClient: Loaded ${headerChain.size} headers from checkpoint, chain height: $chainHeight")
             
             val tipHeader = headerChain.lastOrNull()
             if (tipHeader != null) {
@@ -93,14 +90,13 @@ object SpvClient {
     }
     
     private suspend fun syncAndValidateHeaders() {
-        android.util.Log.d("HNSGo", "SpvClient: Syncing additional headers from P2P starting from height $chainHeight")
         val networkHeight = syncHeaders()
         if (networkHeight != null) {
             HeaderSync.validateHeightAgainstNetwork(chainHeight, networkHeight)
         }
     }
     
-    private suspend fun syncHeaders(): Int? = withContext(Dispatchers.IO) {
+    private suspend fun syncHeaders(): Int? = withContext(Config.HEADER_SYNC_DISPATCHER) {
         // Calculate firstInMemoryHeight dynamically from current chain state
         // This handles the case where headers were trimmed (firstInMemoryHeight becomes stale)
         // Formula: firstInMemoryHeight = chainHeight - headerChain.size + 1
@@ -115,7 +111,6 @@ object SpvClient {
         
         // Update firstInMemoryHeight if it changed (headers were trimmed)
         if (calculatedFirstInMemory != firstInMemoryHeight) {
-            android.util.Log.d("HNSGo", "SpvClient: Updating firstInMemoryHeight from $firstInMemoryHeight to $calculatedFirstInMemory (headers trimmed)")
             firstInMemoryHeight = calculatedFirstInMemory
         }
         
@@ -203,19 +198,14 @@ object SpvClient {
             syncAndValidateHeaders()
         } else {
             android.util.Log.e("HNSGo", "SpvClient: CRITICAL - No headers available! Checkpoint bootstrap failed.")
-            android.util.Log.e("HNSGo", "SpvClient: Cannot proceed without checkpoint. Please ensure checkpoint.dat is embedded in assets.")
         }
         
-        android.util.Log.d("HNSGo", "SpvClient: Initialized with ${headerChain.size} headers (height: $chainHeight)")
         
         if (headerChain.isEmpty()) {
             android.util.Log.w("HNSGo", "SpvClient: WARNING - No headers available!")
-            android.util.Log.w("HNSGo", "SpvClient: Domain resolution will fail until headers are synced")
             android.util.Log.w("HNSGo", "SpvClient: To bootstrap autonomously:")
-            android.util.Log.w("HNSGo", "  1. Embed checkpoint data from hnsd's checkpoints.h (recommended)")
             android.util.Log.w("HNSGo", "  2. Connect to working Handshake P2P peers via DNS seed discovery")
             if (Config.DEBUG_MODE) {
-                android.util.Log.w("HNSGo", "  3. [DEBUG] Use external resolver: SpvClient.setResolver(host, port)")
             }
         }
     }
@@ -223,7 +213,7 @@ object SpvClient {
     /**
      * Continue syncing headers in background until caught up
      */
-    suspend fun continueSync(): Int? = withContext(Dispatchers.IO) {
+    suspend fun continueSync(): Int? = withContext(Config.HEADER_SYNC_DISPATCHER) {
         HeaderSync.continueSync(
             headerChain = headerChain,
             getChainHeight = { chainHeight },
@@ -248,7 +238,7 @@ object SpvClient {
     /**
      * Resolve Handshake domain to DNS records
      */
-    suspend fun resolve(name: String): List<Record>? = withContext(Dispatchers.IO) {
+    suspend fun resolve(name: String): List<Record>? = withContext(Config.NAME_QUERY_DISPATCHER) {
         NameResolver.resolve(
             name = name,
             headerChain = headerChain,

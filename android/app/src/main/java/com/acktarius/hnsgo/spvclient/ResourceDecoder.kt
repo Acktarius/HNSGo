@@ -36,7 +36,6 @@ internal object ResourceDecoder {
      */
     fun decodeResource(proofData: ByteArray): List<com.acktarius.hnsgo.Record> {
         if (proofData.isEmpty()) {
-            Log.w("HNSGo", "ResourceDecoder: Empty proof data")
             return emptyList()
         }
         
@@ -45,21 +44,17 @@ internal object ResourceDecoder {
         try {
             // Read version (must be 0) - matching hnsd resource.c:413-418
             if (buffer.remaining() < 1) {
-                Log.w("HNSGo", "ResourceDecoder: Proof data too short for version")
                 return emptyList()
             }
             val version = buffer.get().toInt() and 0xFF
             if (version != 0) {
-                Log.w("HNSGo", "ResourceDecoder: Invalid resource version: $version (expected 0)")
                 return emptyList()
             }
             
-            Log.d("HNSGo", "ResourceDecoder: Resource version: $version, remaining bytes: ${buffer.remaining()}")
             
             // Debug: dump first 50 bytes of resource data for analysis
             val debugDump = proofData.sliceArray(0 until minOf(50, proofData.size))
                 .joinToString(" ") { "%02x".format(it) }
-            Log.d("HNSGo", "ResourceDecoder: First 50 bytes of resource data: $debugDump")
             
             val records = mutableListOf<com.acktarius.hnsgo.Record>()
             val glueNames = mutableSetOf<String>() // Track nameserver names from GLUE records
@@ -70,7 +65,6 @@ internal object ResourceDecoder {
                 if (buffer.remaining() < 1) break
                 val type = buffer.get().toInt() and 0xFF
                 
-                Log.d("HNSGo", "ResourceDecoder: Reading record type: $type, remaining: ${buffer.remaining()}")
                 
                 // Handle unknown record types by trying to skip to next valid record
                 val validTypes = setOf(
@@ -83,7 +77,6 @@ internal object ResourceDecoder {
                     com.acktarius.hnsgo.Config.HSK_TEXT
                 )
                 if (type !in validTypes) {
-                    Log.w("HNSGo", "ResourceDecoder: Unknown record type: $type (0x${type.toString(16)}), attempting to skip")
                     val currentPos = buffer.position()
                     var foundNext = false
                     
@@ -98,7 +91,6 @@ internal object ResourceDecoder {
                                 // Found next valid record type at a valid boundary, skip to it
                                 buffer.position(peekPos)
                                 foundNext = true
-                                Log.d("HNSGo", "ResourceDecoder: Found next valid record type $peekByte at offset $peekPos, skipping ${peekPos - currentPos} bytes")
                                 break
                             }
                         }
@@ -106,7 +98,6 @@ internal object ResourceDecoder {
                     
                     if (!foundNext) {
                         // Couldn't find next record, stop parsing
-                        Log.w("HNSGo", "ResourceDecoder: Could not find next valid record type, stopping parse")
                         break
                     }
                     // Continue loop to process the next record
@@ -128,7 +119,6 @@ internal object ResourceDecoder {
                 val record = readRecord(type, proofData, buffer)
                 
                 if (record == null) {
-                    Log.w("HNSGo", "ResourceDecoder: Failed to decode record type $type, stopping parse")
                     break
                 }
                 
@@ -138,18 +128,15 @@ internal object ResourceDecoder {
             // If we have GLUE records but no NS records, create NS records from GLUE names
             val hasNSRecords = records.any { it.type == com.acktarius.hnsgo.Config.HSK_NS }
             if (!hasNSRecords && glueNames.isNotEmpty()) {
-                Log.d("HNSGo", "ResourceDecoder: No NS records found, creating NS records from ${glueNames.size} GLUE record names")
                 for (name in glueNames) {
                     val nameBytes = name.toByteArray(Charsets.UTF_8)
                     records.add(0, com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_NS, nameBytes)) // Add NS record at beginning
                 }
             }
             
-            Log.d("HNSGo", "ResourceDecoder: Parsed ${records.size} resource records from proof data")
             return records
             
         } catch (e: Exception) {
-            Log.e("HNSGo", "ResourceDecoder: Error parsing resource records", e)
             return emptyList()
         }
     }
@@ -181,7 +168,6 @@ internal object ResourceDecoder {
             com.acktarius.hnsgo.Config.HSK_TEXT -> decodeTXTRecord(buffer) // HSK_TEXT = 6
             else -> {
                 // Unknown record type (should not reach here due to check above)
-                Log.w("HNSGo", "ResourceDecoder: Unknown record type in readRecord: $type")
                 null
             }
         }
@@ -198,10 +184,8 @@ internal object ResourceDecoder {
             val (name, bytesConsumed) = result
             val nameBytes = name.toByteArray(Charsets.UTF_8)
             buffer.position(buffer.position() + bytesConsumed)
-            Log.d("HNSGo", "ResourceDecoder: Parsed NS record: $name (consumed $bytesConsumed bytes)")
             return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_NS, nameBytes)
         } else {
-            Log.w("HNSGo", "ResourceDecoder: Failed to read NS name")
             return null
         }
     }
@@ -222,7 +206,6 @@ internal object ResourceDecoder {
             val nameEndPos = nameStartPos + bytesConsumed
             buffer.position(nameEndPos)
             
-            Log.d("HNSGo", "ResourceDecoder: GLUE4 name '$name' consumed $bytesConsumed bytes, buffer now at ${buffer.position()}, remaining: ${buffer.remaining()}")
             
             if (buffer.remaining() >= 4) {
                 val ipStartPos = buffer.position()
@@ -230,8 +213,6 @@ internal object ResourceDecoder {
                 buffer.get(ipBytes)
                 val ip = InetAddress.getByAddress(ipBytes).hostAddress
                 val ipHex = ipBytes.joinToString(" ") { "%02x".format(it) }
-                Log.d("HNSGo", "ResourceDecoder: Parsed GLUE4 record: name=$name, ip=$ip")
-                Log.d("HNSGo", "ResourceDecoder: GLUE4 IP bytes at offset $ipStartPos: $ipHex (decimal: ${ipBytes.joinToString(".") { "${it.toInt() and 0xFF}" }})")
                 
                 // Store name + null byte + IP bytes (matching hnsd's hsk_glue4_record_t structure)
                 val nameBytes = name.toByteArray(Charsets.UTF_8)
@@ -241,7 +222,6 @@ internal object ResourceDecoder {
                 System.arraycopy(ipBytes, 0, recordData, nameBytes.size + 1, 4)
                 return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_GLUE4, recordData)
             } else {
-                Log.w("HNSGo", "ResourceDecoder: GLUE4 record incomplete (missing IPv4), remaining: ${buffer.remaining()}")
                 // Debug: show what bytes we have
                 if (buffer.remaining() > 0) {
                     val availableBytes = ByteArray(minOf(4, buffer.remaining()))
@@ -249,12 +229,10 @@ internal object ResourceDecoder {
                     buffer.get(availableBytes)
                     buffer.position(savedPos)
                     val hex = availableBytes.joinToString(" ") { "%02x".format(it) }
-                    Log.w("HNSGo", "ResourceDecoder: GLUE4 available bytes: $hex")
                 }
                 return null
             }
         } else {
-            Log.w("HNSGo", "ResourceDecoder: Failed to read GLUE4 name")
             return null
         }
     }
@@ -272,14 +250,12 @@ internal object ResourceDecoder {
             val nameEndPos = nameStartPos + bytesConsumed
             buffer.position(nameEndPos)
             
-            Log.d("HNSGo", "ResourceDecoder: GLUE6 name '$name' consumed $bytesConsumed bytes, buffer now at ${buffer.position()}, remaining: ${buffer.remaining()}")
             
             if (buffer.remaining() >= 16) {
                 val ipStartPos = buffer.position()
                 val ipBytes = ByteArray(16)
                 buffer.get(ipBytes)
                 val ipHex = ipBytes.joinToString(" ") { "%02x".format(it) }
-                Log.d("HNSGo", "ResourceDecoder: Parsed GLUE6 record: name=$name, IP bytes at offset $ipStartPos: $ipHex")
                 
                 // Store name + null byte + IP bytes (matching hnsd's hsk_glue6_record_t structure)
                 val nameBytes = name.toByteArray(Charsets.UTF_8)
@@ -289,7 +265,6 @@ internal object ResourceDecoder {
                 System.arraycopy(ipBytes, 0, recordData, nameBytes.size + 1, 16)
                 return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_GLUE6, recordData)
             } else {
-                Log.w("HNSGo", "ResourceDecoder: GLUE6 record incomplete (missing IPv6), remaining: ${buffer.remaining()}")
                 // Debug: show what bytes we have
                 if (buffer.remaining() > 0) {
                     val availableBytes = ByteArray(minOf(16, buffer.remaining()))
@@ -297,12 +272,10 @@ internal object ResourceDecoder {
                     buffer.get(availableBytes)
                     buffer.position(savedPos)
                     val hex = availableBytes.joinToString(" ") { "%02x".format(it) }
-                    Log.w("HNSGo", "ResourceDecoder: GLUE6 available bytes: $hex")
                 }
                 return null
             }
         } else {
-            Log.w("HNSGo", "ResourceDecoder: Failed to read GLUE6 name")
             return null
         }
     }
@@ -322,14 +295,11 @@ internal object ResourceDecoder {
             // Decode IP from base32-encoded DNS name
             val ipBytes = decodeSynthNameToIP(name)
             if (ipBytes != null) {
-                Log.d("HNSGo", "ResourceDecoder: Parsed SYNTH4 record: name=$name, ip=${ipBytes.joinToString(".") { "${it.toInt() and 0xFF}" }}")
                 return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_SYNTH4, ipBytes)
             } else {
-                Log.w("HNSGo", "ResourceDecoder: Failed to decode SYNTH4 IP from name: $name")
                 return null
             }
         } else {
-            Log.w("HNSGo", "ResourceDecoder: Failed to read SYNTH4 name")
             return null
         }
     }
@@ -350,14 +320,11 @@ internal object ResourceDecoder {
             val ipBytes = decodeSynthNameToIP(name)
             if (ipBytes != null) {
                 val ipHex = ipBytes.joinToString(" ") { "%02x".format(it) }
-                Log.d("HNSGo", "ResourceDecoder: Parsed SYNTH6 record: name=$name, IP bytes: $ipHex")
                 return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_SYNTH6, ipBytes)
             } else {
-                Log.w("HNSGo", "ResourceDecoder: Failed to decode SYNTH6 IP from name: $name")
                 return null
             }
         } else {
-            Log.w("HNSGo", "ResourceDecoder: Failed to read SYNTH6 name")
             return null
         }
     }
@@ -387,7 +354,6 @@ internal object ResourceDecoder {
      */
     private fun decodeDSRecord(buffer: ByteBuffer): com.acktarius.hnsgo.Record? {
         if (buffer.remaining() < 5) {
-            Log.w("HNSGo", "ResourceDecoder: DS record incomplete (header)")
             return null
         }
         
@@ -400,7 +366,6 @@ internal object ResourceDecoder {
         val digestLen = buffer.get().toInt() and 0xFF
         
         if (digestLen > 64 || buffer.remaining() < digestLen) {
-            Log.w("HNSGo", "ResourceDecoder: Invalid DS record digest length: $digestLen")
             return null
         }
         
@@ -415,7 +380,6 @@ internal object ResourceDecoder {
         dsData[3] = digestType.toByte()
         System.arraycopy(digest, 0, dsData, 4, digestLen)
         
-        Log.d("HNSGo", "ResourceDecoder: Parsed DS record (keyTag=$keyTag, algorithm=$algorithm, digestType=$digestType)")
         return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_DS, dsData)
     }
     
@@ -426,7 +390,6 @@ internal object ResourceDecoder {
      */
     private fun decodeTXTRecord(buffer: ByteBuffer): com.acktarius.hnsgo.Record? {
         if (buffer.remaining() < 1) {
-            Log.w("HNSGo", "ResourceDecoder: TXT record incomplete (array length)")
             return null
         }
         
@@ -435,12 +398,10 @@ internal object ResourceDecoder {
         
         for (i in 0 until arrayLen) {
             if (buffer.remaining() < 1) {
-                Log.w("HNSGo", "ResourceDecoder: TXT record incomplete (string $i length)")
                 break
             }
             val strLen = buffer.get().toInt() and 0xFF
             if (buffer.remaining() < strLen) {
-                Log.w("HNSGo", "ResourceDecoder: TXT record incomplete (string $i data)")
                 break
             }
             
@@ -454,7 +415,6 @@ internal object ResourceDecoder {
             txtData = newTxtData
         }
         
-        Log.d("HNSGo", "ResourceDecoder: Parsed TXT record (${arrayLen} strings, ${txtData.size} bytes)")
         return com.acktarius.hnsgo.Record(com.acktarius.hnsgo.Config.HSK_TEXT, txtData)
     }
     
@@ -540,7 +500,6 @@ internal object ResourceDecoder {
             
             while (currentOffset < currentDataLen) {
                 if (currentOffset in visitedOffsets) {
-                    Log.e("HNSGo", "ResourceDecoder: Compression loop detected at offset $currentOffset")
                     return null
                 }
                 visitedOffsets.add(currentOffset)
@@ -562,7 +521,6 @@ internal object ResourceDecoder {
                 if ((length and 0xC0) == 0xC0) {
                     // Compression pointer: read second byte
                     if (currentOffset >= currentDataLen) {
-                        Log.e("HNSGo", "ResourceDecoder: Compression pointer incomplete")
                         return null
                     }
                     
@@ -571,28 +529,23 @@ internal object ResourceDecoder {
                     
                     // Calculate pointer offset
                     val pointerOffset = ((length and 0x3F) shl 8) or secondByte
-                    Log.d("HNSGo", "ResourceDecoder: Compression pointer at offset ${currentOffset - 2} (startOffset=$startOffset): 0x${length.toString(16)}${secondByte.toString(16).padStart(2, '0')} -> offset $pointerOffset")
                     
                     // If this is the first pointer, set bytesConsumed
                     // Matching hnsd: "if (ptr == 0) res = off" where off is after reading both bytes
                     if (pointerCount == 0) {
                         bytesConsumed = currentOffset - startOffset // Total bytes read (2 bytes for pointer)
-                        Log.d("HNSGo", "ResourceDecoder: First compression pointer, bytesConsumed=$bytesConsumed")
                     }
                     
                     pointerCount++
                     if (pointerCount > 10) {
-                        Log.e("HNSGo", "ResourceDecoder: Too many compression pointer hops")
                         return null
                     }
                     
                     if (pointerOffset >= data.size) {
-                        Log.e("HNSGo", "ResourceDecoder: Compression pointer out of bounds: $pointerOffset")
                         return null
                     }
                     
                     // Follow compression pointer (matching hnsd: off = pointerOffset, data = dmp->msg, data_len = dmp->msg_len)
-                    Log.d("HNSGo", "ResourceDecoder: Following compression pointer from ${currentOffset - 2} to $pointerOffset")
                     currentOffset = pointerOffset
                     currentData = data
                     currentDataLen = data.size
@@ -601,11 +554,9 @@ internal object ResourceDecoder {
                 
                 // Regular label - matching hnsd dns.c:2122-2158
                 if (length > 63) {
-                    Log.e("HNSGo", "ResourceDecoder: Invalid label length: $length")
                     return null
                 }
                 if (currentOffset + length > currentDataLen) {
-                    Log.e("HNSGo", "ResourceDecoder: Label extends beyond data")
                     return null
                 }
                 
@@ -617,7 +568,6 @@ internal object ResourceDecoder {
             }
             
             if (labels.isEmpty()) {
-                Log.w("HNSGo", "ResourceDecoder: Empty DNS name")
                 return null
             }
             
@@ -634,11 +584,9 @@ internal object ResourceDecoder {
                 data.sliceArray(startOffset until end)
                     .joinToString(" ") { "%02x".format(it) }
             } else "N/A"
-            Log.d("HNSGo", "ResourceDecoder: Read DNS name: $name (from offset $startOffset, consumed $bytesConsumed bytes, end offset: $endOffset, bytes: $debugBytes)")
             return Pair(name, bytesConsumed)
             
         } catch (e: Exception) {
-            Log.e("HNSGo", "ResourceDecoder: Error reading DNS name from offset $startOffset", e)
             null
         }
     }

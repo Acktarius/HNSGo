@@ -37,27 +37,21 @@ object DnsSeedDiscovery {
     suspend fun discoverPeersFromDnsSeeds(): List<String> = withContext(Dispatchers.IO) {
         val discoveredPeers = mutableSetOf<String>()
         
-        Log.d("DnsSeedDiscovery", "Starting DNS seed discovery from ${DNS_SEEDS.size} seeds")
         
         for (seed in DNS_SEEDS) {
             try {
-                Log.d("DnsSeedDiscovery", "Querying DNS seed: $seed")
                 val peers = queryDnsSeed(seed)
                 
                 if (peers.isNotEmpty()) {
-                    Log.d("DnsSeedDiscovery", "Found ${peers.size} peers from $seed")
                     discoveredPeers.addAll(peers)
                 } else {
-                    Log.w("DnsSeedDiscovery", "No peers found from DNS seed: $seed")
                 }
             } catch (e: Exception) {
-                Log.w("DnsSeedDiscovery", "Error querying DNS seed $seed: ${e.message}")
                 // Continue to next seed
             }
         }
         
         val peerList = discoveredPeers.toList()
-        Log.d("DnsSeedDiscovery", "DNS seed discovery complete: found ${peerList.size} unique peers")
         return@withContext peerList
     }
     
@@ -85,12 +79,10 @@ object DnsSeedDiscovery {
             for (dnsServer in dnsServers) {
                 try {
                     val resolver = if (dnsServer != null) {
-                        Log.d("DnsSeedDiscovery", "Trying DNS server: $dnsServer for $seedDomain")
                         SimpleResolver(dnsServer).apply {
                             timeout = java.time.Duration.ofSeconds(5) // 5 second timeout per query
                         }
                     } else {
-                        Log.d("DnsSeedDiscovery", "Trying system DNS resolver for $seedDomain")
                         SimpleResolver().apply {
                             timeout = java.time.Duration.ofSeconds(5) // 5 second timeout per query
                         }
@@ -103,7 +95,6 @@ object DnsSeedDiscovery {
                     
                     if (aLookup.result == Lookup.SUCCESSFUL) {
                         aRecords = aLookup.answers?.filterIsInstance<ARecord>() ?: emptyList()
-                        Log.d("DnsSeedDiscovery", "Found ${aRecords.size} A records for $seedDomain using ${dnsServer ?: "system"}")
                         
                         // Also query AAAA and TXT with the same resolver
                         val aaaaLookup = Lookup(seedDomain, Type.AAAA)
@@ -111,7 +102,6 @@ object DnsSeedDiscovery {
                         aaaaLookup.run()
                         if (aaaaLookup.result == Lookup.SUCCESSFUL) {
                             aaaaRecords = aaaaLookup.answers?.filterIsInstance<AAAARecord>() ?: emptyList()
-                            Log.d("DnsSeedDiscovery", "Found ${aaaaRecords.size} AAAA records for $seedDomain")
                         }
                         
                         val txtLookup = Lookup(seedDomain, Type.TXT)
@@ -119,16 +109,13 @@ object DnsSeedDiscovery {
                         txtLookup.run()
                         if (txtLookup.result == Lookup.SUCCESSFUL) {
                             txtRecords = txtLookup.answers?.filterIsInstance<TXTRecord>() ?: emptyList()
-                            Log.d("DnsSeedDiscovery", "Found ${txtRecords.size} TXT records for $seedDomain")
                         }
                         
                         // Success! Break out of loop
                         break
                     } else {
-                        Log.d("DnsSeedDiscovery", "DNS lookup failed for $seedDomain using ${dnsServer ?: "system"}: result=${aLookup.result}")
                     }
                 } catch (e: Exception) {
-                    Log.d("DnsSeedDiscovery", "Error querying DNS server ${dnsServer ?: "system"} for $seedDomain: ${e.message}")
                     // Continue to next DNS server
                 }
             }
@@ -141,11 +128,9 @@ object DnsSeedDiscovery {
                         val ip = address.hostAddress
                         if (ip != null && ip.isNotBlank()) {
                             peers.add("$ip:$MAINNET_PORT")
-                            Log.d("DnsSeedDiscovery", "Found IPv4 peer: $ip:$MAINNET_PORT")
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w("DnsSeedDiscovery", "Error processing A record: ${e.message}")
                 }
             }
             
@@ -157,11 +142,9 @@ object DnsSeedDiscovery {
                         val ip = address.hostAddress
                         if (ip != null && ip.isNotBlank()) {
                             peers.add("$ip:$MAINNET_PORT")
-                            Log.d("DnsSeedDiscovery", "Found IPv6 peer: $ip:$MAINNET_PORT")
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w("DnsSeedDiscovery", "Error processing AAAA record: ${e.message}")
                 }
             }
             
@@ -174,33 +157,25 @@ object DnsSeedDiscovery {
                             try {
                                 val txtStr = txt.toString()
                                 if (txtStr.isNotBlank()) {
-                                    Log.d("DnsSeedDiscovery", "TXT record: $txtStr")
                                     // Try to parse as IP:port or just IP
                                     if (txtStr.contains(":") && isValidPeerAddress(txtStr)) {
                                         peers.add(txtStr)
-                                        Log.d("DnsSeedDiscovery", "Found peer from TXT: $txtStr")
                                     } else if (isValidIP(txtStr)) {
                                         peers.add("$txtStr:$MAINNET_PORT")
-                                        Log.d("DnsSeedDiscovery", "Found IP from TXT: $txtStr")
                                     }
                                 }
                             } catch (e: Exception) {
-                                Log.w("DnsSeedDiscovery", "Error processing TXT string: ${e.message}")
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w("DnsSeedDiscovery", "Error processing TXT record: ${e.message}")
                 }
             }
             
             if (peers.isEmpty()) {
-                Log.w("DnsSeedDiscovery", "No peers found from $seedDomain (A: ${aRecords.size}, AAAA: ${aaaaRecords.size}, TXT: ${txtRecords.size})")
-                Log.w("DnsSeedDiscovery", "NOTE: $seedDomain may not be a DNS seed server, or may need to be queried differently")
             }
             
         } catch (e: Exception) {
-            Log.e("DnsSeedDiscovery", "Error querying DNS seed $seedDomain", e)
         }
         
         return@withContext peers

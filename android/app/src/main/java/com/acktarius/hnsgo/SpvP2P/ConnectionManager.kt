@@ -51,61 +51,50 @@ internal object ConnectionManager {
         FullNodePeers.init(dataDir)
     }
     
-    suspend fun discoverPeers(): List<String> = withContext(Dispatchers.IO) {
+    suspend fun discoverPeers(): List<String> = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         val allPeers = mutableSetOf<String>()
         
         val verifiedPeers = HardcodedPeers.loadPeers()
         
-        Log.d("HNSGo", "ConnectionManager: Starting peer discovery - querying DNS seeds first")
         val dnsPeers = try {
             withTimeoutOrNull(30000L) {
                 DnsSeedDiscovery.discoverPeersFromDnsSeeds()
             } ?: emptyList()
         } catch (e: TimeoutCancellationException) {
-            Log.w("HNSGo", "ConnectionManager: DNS seed discovery timed out")
             emptyList()
         } catch (e: Exception) {
-            Log.w("HNSGo", "ConnectionManager: Error querying DNS seeds: ${e.message}")
             emptyList()
         }
         
         if (dnsPeers.isNotEmpty()) {
-            Log.d("HNSGo", "ConnectionManager: Found ${dnsPeers.size} peers from DNS seeds")
             allPeers.addAll(dnsPeers)
             
             try {
                 if (HardcodedPeers.isEmpty()) {
-                    Log.d("HNSGo", "ConnectionManager: Hardcoded list is empty, populating with first 10 DNS-discovered peers")
                     HardcodedPeers.addPeers(dnsPeers)
                 } else {
                     HardcodedPeers.addPeers(dnsPeers)
                 }
             } catch (e: Exception) {
-                Log.e("HNSGo", "ConnectionManager: Error adding DNS peers to hardcoded list", e)
             }
         }
         
         if (allPeers.isEmpty()) {
-            Log.w("HNSGo", "ConnectionManager: No peers from DNS seeds, using hardcoded fallback")
             val fallbackPeers = HardcodedPeers.getFallbackPeers()
             if (fallbackPeers.isNotEmpty()) {
-                Log.d("HNSGo", "ConnectionManager: Using ${fallbackPeers.size} hardcoded fallback peers")
                 allPeers.addAll(fallbackPeers)
             } else {
-                Log.w("HNSGo", "ConnectionManager: No hardcoded peers available")
             }
         }
         
         val peerList = allPeers.toList()
-        Log.d("HNSGo", "ConnectionManager: Total peers discovered: ${peerList.size}")
         return@withContext peerList
     }
     
-    suspend fun recordSuccessfulPeer(peer: String) = withContext(Dispatchers.IO) {
+    suspend fun recordSuccessfulPeer(peer: String) = withContext(Config.PEER_DISCOVERY_DISPATCHER) {
         if (DnsSeedDiscovery.isValidPeerAddress(peer)) {
             HardcodedPeers.addPeers(listOf(peer))
             PeerErrorTracker.resetErrors(peer)
-            Log.d("HNSGo", "ConnectionManager: Recorded successful peer: $peer")
         }
     }
     
@@ -128,28 +117,23 @@ internal object ConnectionManager {
                 socket.connect(InetSocketAddress(host, port), Config.P2P_CONNECT_TIMEOUT_MS)
                 // Socket read timeout: 30 seconds (from Config.P2P_SOCKET_TIMEOUT_MS)
                 socket.soTimeout = Config.P2P_SOCKET_TIMEOUT_MS
-                Log.d("HNSGo", "ConnectionManager: Connected to $host:$port on attempt $attempt (TCP_NODELAY=true, keepAlive=true)")
                 return@withContext socket
             } catch (e: ConnectException) {
                 lastException = e
-                Log.d("HNSGo", "ConnectionManager: Connection attempt $attempt/$maxRetries failed: ${e.message}")
                 if (attempt < maxRetries) {
                     delay(1000L * attempt)
                 }
             } catch (e: SocketTimeoutException) {
                 lastException = e
-                Log.d("HNSGo", "ConnectionManager: Connection timeout on attempt $attempt/$maxRetries")
                 if (attempt < maxRetries) {
                     delay(1000L * attempt)
                 }
             } catch (e: Exception) {
                 lastException = e
-                Log.e("HNSGo", "ConnectionManager: Unexpected error connecting to $host:$port", e)
                 break
             }
         }
         
-        Log.w("HNSGo", "ConnectionManager: Failed to connect to $host:$port after $maxRetries attempts")
         null
     }
     
@@ -161,7 +145,7 @@ internal object ConnectionManager {
         onHeaderReceived: (Header, ByteArray) -> Boolean, // Now accepts pre-computed hash
         messageHandler: MessageHandler,
         protocolHandler: ProtocolHandler
-    ): SyncAttemptResult = withContext(Dispatchers.IO) {
+    ): SyncAttemptResult = withContext(Config.HEADER_SYNC_DISPATCHER) {
         var socket: Socket? = null
         var peerHeight: Int? = null // Preserve peer height across exceptions
         try {
@@ -174,31 +158,26 @@ internal object ConnectionManager {
             val input = socket.getInputStream()
             val output = socket.getOutputStream()
             
-            Log.d("HNSGo", "ConnectionManager: Starting handshake for header sync to $host:$port")
             protocolHandler.sendVersion(output, host, port, startHeight, messageHandler)
             val (handshakeSuccess, extractedPeerHeight, peerServices) = protocolHandler.handshake(input, output, messageHandler)
             peerHeight = extractedPeerHeight // Store for use in exception handlers
             
             // Log peer height even if handshake fails (useful for network height tracking)
             if (peerHeight != null) {
-                Log.d("HNSGo", "ConnectionManager: Peer $host:$port reported height: $peerHeight")
             }
             
             // Record verified full nodes (peers with NETWORK service flag) even during header sync
             // This helps prioritize them for future name queries
             if (handshakeSuccess && peerServices != null && (peerServices and 1L) != 0L) {
                 val peerAddress = "$host:$port"
-                Log.d("HNSGo", "ConnectionManager: Peer $peerAddress has NETWORK service flag (services: $peerServices), recording as verified full node")
                 FullNodePeers.recordVerifiedFullNode(peerAddress)
             }
             
             if (!handshakeSuccess) {
-                Log.w("HNSGo", "ConnectionManager: Handshake failed for header sync")
                 // Handshake failure - this is an error
                 return@withContext SyncAttemptResult(false, peerHeight, wasError = true)
             }
             
-            Log.d("HNSGo", "ConnectionManager: Handshake successful, requesting headers")
             // Follow hnsd protocol order: sendheaders -> getaddr -> getheaders
             protocolHandler.sendSendHeaders(output, messageHandler)
             protocolHandler.sendGetAddr(output, messageHandler)
@@ -209,10 +188,8 @@ internal object ConnectionManager {
             var locatorIndex = 0
             val maxLocatorAttempts = minOf(locatorHashes.size, 10) // Try up to 10 different locator hashes
             
-            Log.d("HNSGo", "ConnectionManager: Starting locator loop with ${locatorHashes.size} hashes, max attempts: $maxLocatorAttempts")
             
             while (!headersReceived && locatorIndex < maxLocatorAttempts) {
-                Log.d("HNSGo", "ConnectionManager: Locator loop iteration: index=$locatorIndex, max=$maxLocatorAttempts, headersReceived=$headersReceived")
                 val currentLocator = if (locatorIndex == 0) {
                     locatorHashes  // First attempt: use full locator
                 } else {
@@ -222,7 +199,6 @@ internal object ConnectionManager {
                 
                 if (locatorIndex > 0) {
                     val hashHex = currentLocator.first().joinToString("") { "%02x".format(it) }
-                    Log.d("HNSGo", "ConnectionManager: Trying earlier locator hash (attempt ${locatorIndex + 1}/$maxLocatorAttempts): ${hashHex.take(16)}...")
                 }
                 
                 protocolHandler.sendGetHeaders(output, currentLocator, messageHandler)
@@ -234,16 +210,13 @@ internal object ConnectionManager {
                 // the peer doesn't have headers after our tip
                 if (result.hasValidHeaders) {
                     headersReceived = true
-                    Log.d("HNSGo", "ConnectionManager: Successfully received valid headers with locator index $locatorIndex")
                 } else if (result.receivedAnyHeaders) {
                     // We received headers but they were all rejected (old/duplicates)
                     // This means the peer has those headers but not the ones we need
                     // Trying even earlier hashes won't help - stop and try next peer
-                    Log.d("HNSGo", "ConnectionManager: Received headers but all rejected (old/duplicates) at locator index $locatorIndex - peer doesn't have headers after our tip")
                     break  // Stop trying earlier hashes, try next peer
                 } else {
                     // "notfound" - peer doesn't have the requested hash, try earlier
-                    Log.d("HNSGo", "ConnectionManager: Got notfound with locator index $locatorIndex, trying earlier hash")
                     locatorIndex++
                 }
             }
@@ -256,21 +229,16 @@ internal object ConnectionManager {
             val isAtCheckpoint = startHeight == checkpointEndHeight  // Only at exact checkpoint end
             
             if (!headersReceived && isAtCheckpoint && locatorHashes.isNotEmpty() && locatorHashes.first().any { it != 0.toByte() }) {
-                Log.d("HNSGo", "ConnectionManager: Got notfound at checkpoint height $startHeight, trying genesis fallback (one-time bootstrap)")
-                Log.d("HNSGo", "ConnectionManager: This is a workaround for peers that pruned old headers - hnsd would just keep retrying")
                 val genesisLocator = listOf(ByteArray(32))  // Genesis hash (all zeros)
                 protocolHandler.sendGetHeaders(output, genesisLocator, messageHandler)
                 val genesisResult = protocolHandler.receiveHeaders(input, output, onHeaderReceived, messageHandler)
                 headersReceived = genesisResult.hasValidHeaders
                 
                 if (headersReceived) {
-                    Log.d("HNSGo", "ConnectionManager: Genesis fallback successful!")
                 } else {
-                    Log.d("HNSGo", "ConnectionManager: Genesis fallback also failed - will retry with same locator (matching hnsd)")
                 }
             } else if (!headersReceived) {
                 // Matching hnsd: just log and try next peer with same locator
-                Log.d("HNSGo", "ConnectionManager: Got notfound at height $startHeight after trying $locatorIndex locator hashes (max was $maxLocatorAttempts) - will retry with next peer")
             }
             
             if (headersReceived) {
@@ -278,23 +246,18 @@ internal object ConnectionManager {
                 return@withContext SyncAttemptResult(true, peerHeight, wasError = false)
             } else {
                 // Got notfound or no headers - valid protocol response, not an error
-                Log.d("HNSGo", "ConnectionManager: No headers received (notfound or empty) - valid protocol response")
                 return@withContext SyncAttemptResult(false, peerHeight, wasError = false)
             }
         } catch (e: UnknownHostException) {
-            Log.w("HNSGo", "ConnectionManager: Unknown host $host")
             return@withContext SyncAttemptResult(false, peerHeight, wasError = true)
         } catch (e: java.io.IOException) {
-            Log.e("HNSGo", "ConnectionManager: I/O error connecting to $host:$port", e)
             return@withContext SyncAttemptResult(false, peerHeight, wasError = true)
         } catch (e: Exception) {
-            Log.e("HNSGo", "ConnectionManager: Unexpected error connecting to $host:$port", e)
             return@withContext SyncAttemptResult(false, peerHeight, wasError = true)
         } finally {
             try {
                 socket?.close()
             } catch (e: Exception) {
-                Log.d("HNSGo", "ConnectionManager: Error closing socket", e)
             }
         }
     }
@@ -308,7 +271,7 @@ internal object ConnectionManager {
         headerChain: List<Header>?, // Optional: if provided, calculate root based on peer height
         messageHandler: MessageHandler,
         protocolHandler: ProtocolHandler
-    ): NameQueryResult = withContext(Dispatchers.IO) {
+    ): NameQueryResult = withContext(Config.NAME_QUERY_DISPATCHER) {
         var socket: Socket? = null
         try {
             socket = connectWithRetry(host, port)
@@ -319,20 +282,16 @@ internal object ConnectionManager {
             val input = socket.getInputStream()
             val output = socket.getOutputStream()
             
-            Log.d("HNSGo", "ConnectionManager: Starting handshake for name query to $host:$port (height: $chainHeight)")
             protocolHandler.sendVersion(output, host, port, chainHeight, messageHandler)
             val (handshakeSuccess, peerHeight, peerServices) = protocolHandler.handshake(input, output, messageHandler)
             if (!handshakeSuccess) {
-                Log.w("HNSGo", "ConnectionManager: Handshake failed for name query to $host:$port (peer may not support name queries or closed connection)")
                 return@withContext NameQueryResult.Error
             }
             
-            Log.d("HNSGo", "ConnectionManager: Handshake successful with $host:$port (peer height: $peerHeight, services: $peerServices)")
             
             // CRITICAL: Validate heights - peer must be within 2 blocks of our height
             // and our height must be within 2 blocks of network height
             if (peerHeight == null) {
-                Log.w("HNSGo", "ConnectionManager: Peer did not report height, rejecting")
                 return@withContext NameQueryResult.Error
             }
             
@@ -340,10 +299,8 @@ internal object ConnectionManager {
             // NETWORK = 1 << 0 = 1 (bit 0 set indicates full node that can serve name proofs)
             // SPV nodes don't have this flag, so they can't serve name proofs
             if (peerServices == null || (peerServices and 1L) == 0L) {
-                Log.w("HNSGo", "ConnectionManager: Peer does not have NETWORK service flag (services: $peerServices), rejecting for name query")
                 return@withContext NameQueryResult.Error
             }
-            Log.d("HNSGo", "ConnectionManager: Peer has NETWORK service flag (services: $peerServices), can serve name proofs")
             
             // Record this peer as a verified full node (has NETWORK flag)
             // This dynamically builds our list of verified full nodes
@@ -355,37 +312,29 @@ internal object ConnectionManager {
             if (networkHeight != null) {
                 val ourHeightDiff = kotlin.math.abs(chainHeight - networkHeight)
                 if (ourHeightDiff > 2) {
-                    Log.w("HNSGo", "ConnectionManager: Our height ($chainHeight) is $ourHeightDiff blocks away from network height ($networkHeight), rejecting peer")
                     return@withContext NameQueryResult.Error
                 }
-                Log.d("HNSGo", "ConnectionManager: Our height ($chainHeight) is within 2 blocks of network height ($networkHeight)")
             } else {
-                Log.d("HNSGo", "ConnectionManager: Network height not available, skipping network height validation")
             }
             
             // Check 2: Peer height should be within 2 blocks of our local height
             val peerHeightDiff = kotlin.math.abs(peerHeight - chainHeight)
             if (peerHeightDiff > 2) {
-                Log.w("HNSGo", "ConnectionManager: Peer height ($peerHeight) is $peerHeightDiff blocks away from our height ($chainHeight), rejecting peer")
                 return@withContext NameQueryResult.Error
             }
-            Log.d("HNSGo", "ConnectionManager: Peer height ($peerHeight) is within 2 blocks of our height ($chainHeight)")
             
             // CRITICAL: Match hnsd's exact handshake flow (pool.c:1351-1363)
             // hnsd sends sendheaders -> getaddr -> getheaders after handshake
             // This ensures the peer knows we're ready and follows the expected protocol
             protocolHandler.sendSendHeaders(output, messageHandler)
-            Log.d("HNSGo", "ConnectionManager: Sent sendheaders (matching hnsd protocol)")
             
             // Send getaddr (matching hnsd pool.c:1357)
             protocolHandler.sendGetAddr(output, messageHandler)
-            Log.d("HNSGo", "ConnectionManager: Sent getaddr (matching hnsd protocol)")
             
             // Send getheaders (matching hnsd pool.c:1363)
             // For name queries, we don't need a full locator - just send empty (uses genesis)
             // This matches hnsd's handshake flow even though we don't need the headers
             protocolHandler.sendGetHeaders(output, emptyList(), messageHandler)
-            Log.d("HNSGo", "ConnectionManager: Sent getheaders (matching hnsd protocol)")
             
             // Consume any responses to getaddr/getheaders before sending getproof
             // Peers may send addr or headers messages, and we should read them to avoid blocking
@@ -399,11 +348,9 @@ internal object ConnectionManager {
                     break  // No more messages or timeout
                 }
                 consumedMessages++
-                Log.d("HNSGo", "ConnectionManager: Consumed message: ${message.command} (before getproof)")
                 // Don't process these messages, just consume them to avoid blocking
             }
             if (consumedMessages > 0) {
-                Log.d("HNSGo", "ConnectionManager: Consumed $consumedMessages messages before sending getproof")
             }
             
             // CRITICAL: Use actual chain root (from hsk_chain_safe_root) + name_hash
@@ -416,10 +363,6 @@ internal object ConnectionManager {
             
             val rootHex = rootToUse.joinToString("") { "%02x".format(it) }
             val nameHashHex = nameHash.joinToString("") { "%02x".format(it) }
-            Log.w("HNSGo", "ConnectionManager: Using chain root + name_hash (matching hnsd)")
-            Log.d("HNSGo", "ConnectionManager: Sending getproof to $host:$port")
-            Log.d("HNSGo", "ConnectionManager:   Root (chain safe root): $rootHex")
-            Log.d("HNSGo", "ConnectionManager:   Key (name_hash): $nameHashHex")
             
             protocolHandler.sendGetProof(output, nameHash, rootToUse, messageHandler)
             
@@ -430,11 +373,9 @@ internal object ConnectionManager {
             while (attempts < maxAttempts && proofMessage == null) {
                 val message = messageHandler.receiveMessage(input)
                 if (message == null) {
-                    Log.w("HNSGo", "ConnectionManager: EOF or null message received while waiting for proof")
                     break
                 }
                 
-                Log.d("HNSGo", "ConnectionManager: Received message: ${message.command}")
                 
                 when (message.command) {
                     "proof" -> {
@@ -442,57 +383,46 @@ internal object ConnectionManager {
                         break
                     }
                     "notfound" -> {
-                        Log.w("HNSGo", "ConnectionManager: Peer returned notfound")
                         return@withContext NameQueryResult.NotFound
                     }
                     "ping" -> {
                         // Handle ping (peer sends ping to keep connection alive)
                         try {
                             val nonce = java.nio.ByteBuffer.wrap(message.payload).order(java.nio.ByteOrder.LITTLE_ENDIAN).long
-                            Log.d("HNSGo", "ConnectionManager: Received ping (nonce=$nonce), sending pong")
                             val pongPayload = ByteArray(8).apply {
                                 java.nio.ByteBuffer.wrap(this).order(java.nio.ByteOrder.LITTLE_ENDIAN).putLong(nonce)
                             }
                             messageHandler.sendMessage(output, "pong", pongPayload)
                             // Continue waiting for proof
                         } catch (e: Exception) {
-                            Log.w("HNSGo", "ConnectionManager: Error handling ping", e)
                         }
                     }
                     "pong" -> {
                         // Response to our ping (if any) - just continue waiting
-                        Log.d("HNSGo", "ConnectionManager: Received pong, continuing to wait for proof")
                     }
                     "addr" -> {
                         // Peer may send addr messages - just continue waiting
-                        Log.d("HNSGo", "ConnectionManager: Received addr message, continuing to wait for proof")
                     }
                     "inv" -> {
                         // Peer may send inv (inventory) messages - just continue waiting
-                        Log.d("HNSGo", "ConnectionManager: Received inv message, continuing to wait for proof")
                     }
                     else -> {
-                        Log.d("HNSGo", "ConnectionManager: Received unexpected message: ${message.command}, continuing to wait for proof")
                     }
                 }
                 attempts++
             }
             
             if (proofMessage == null) {
-                Log.w("HNSGo", "ConnectionManager: No proof message received")
                 return@withContext NameQueryResult.Error
             }
             
             val (resourceRecords, proof) = messageHandler.parseProofMessage(proofMessage.payload)
             if (resourceRecords.isEmpty() && proof == null) {
-                Log.w("HNSGo", "ConnectionManager: Empty proof response")
                 return@withContext NameQueryResult.Error
             }
             
-            Log.d("HNSGo", "ConnectionManager: Received proof with ${resourceRecords.size} resource records")
             return@withContext NameQueryResult.Success(resourceRecords, proof)
         } catch (e: Exception) {
-            Log.e("HNSGo", "ConnectionManager: Error querying name from peer", e)
             return@withContext NameQueryResult.Error
         } finally {
             socket?.close()
@@ -505,15 +435,13 @@ internal object ConnectionManager {
         onHeaderReceived: (Header, ByteArray) -> Boolean, // Now accepts pre-computed hash
         messageHandler: MessageHandler,
         protocolHandler: ProtocolHandler
-    ): SyncResult = withContext(Dispatchers.IO) {
-        Log.d("HNSGo", "ConnectionManager: Starting header sync from height $startHeight")
+    ): SyncResult = withContext(Config.HEADER_SYNC_DISPATCHER) {
         
         val discoveredPeers = try {
             withTimeoutOrNull(15000L) {
                 discoverPeers()
             } ?: emptyList()
         } catch (e: Exception) {
-            Log.w("HNSGo", "ConnectionManager: Peer discovery failed: ${e.message}")
             emptyList()
         }
         
@@ -525,13 +453,11 @@ internal object ConnectionManager {
         val excludedPeers = uniquePeers.filter { PeerErrorTracker.shouldExclude(it) }
         
         if (excludedCount > 0) {
-            Log.d("HNSGo", "ConnectionManager: Excluded $excludedCount peers with too many errors")
         }
         
         // If 50% or more peers are excluded, replace them with new peers
         val exclusionRatio = if (uniquePeers.isNotEmpty()) excludedCount.toDouble() / uniquePeers.size else 0.0
         if (exclusionRatio >= 0.5 && uniquePeers.isNotEmpty()) {
-            Log.w("HNSGo", "ConnectionManager: ${(exclusionRatio * 100).toInt()}% of peers excluded, replacing with new peers")
             
             // Retry peer discovery to get fresh peers
             val newPeers = try {
@@ -539,7 +465,6 @@ internal object ConnectionManager {
                     discoverPeers()
                 } ?: emptyList()
             } catch (e: Exception) {
-                Log.w("HNSGo", "ConnectionManager: Peer discovery retry failed: ${e.message}")
                 emptyList()
             }
             
@@ -553,11 +478,9 @@ internal object ConnectionManager {
                 }
                 
                 val newPeersAdded = newUniquePeers.size - (uniquePeers.size - excludedPeers.size)
-                Log.d("HNSGo", "ConnectionManager: Replaced ${excludedPeers.size} excluded peers with $newPeersAdded new peers")
                 uniquePeers = newUniquePeers
                 filteredPeers = PeerErrorTracker.filterExcluded(uniquePeers)
             } else {
-                Log.w("HNSGo", "ConnectionManager: No new peers discovered, clearing errors for excluded peers")
                 // If we can't get new peers, at least clear errors to retry
                 excludedPeers.forEach { excludedPeer ->
                     PeerErrorTracker.resetErrors(excludedPeer)
@@ -566,12 +489,10 @@ internal object ConnectionManager {
             }
         } else if (filteredPeers.isEmpty() && uniquePeers.isNotEmpty()) {
             // If all peers are excluded (but less than 50% threshold), clear errors and retry
-            Log.w("HNSGo", "ConnectionManager: All peers excluded, clearing error counts to retry")
             PeerErrorTracker.clearAll()
             filteredPeers = uniquePeers // Retry all peers
         }
         
-        Log.d("HNSGo", "ConnectionManager: Trying ${filteredPeers.size} peers (from ${uniquePeers.size} total)")
         
         var maxNetworkHeight: Int? = null
         
@@ -582,7 +503,6 @@ internal object ConnectionManager {
             val host = parts[0]
             val port = parts[1].toIntOrNull() ?: Config.P2P_PORT
             
-            Log.d("HNSGo", "ConnectionManager: Trying peer $host:$port")
             
             val result = connectAndSync(
                 host, port, startHeight, locatorHashes,
@@ -592,12 +512,10 @@ internal object ConnectionManager {
             if (result.peerHeight != null) {
                 if (maxNetworkHeight == null || result.peerHeight > maxNetworkHeight) {
                     maxNetworkHeight = result.peerHeight
-                    Log.d("HNSGo", "ConnectionManager: Updated max network height to $maxNetworkHeight from $host:$port")
                 }
             }
             
             if (result.success) {
-                Log.d("HNSGo", "ConnectionManager: Successfully synced from $host:$port (network height: $maxNetworkHeight)")
                 return@withContext SyncResult(true, maxNetworkHeight)
             }
             
@@ -605,11 +523,9 @@ internal object ConnectionManager {
             if (result.wasError) {
                 PeerErrorTracker.recordError(peer)
             } else {
-                Log.d("HNSGo", "ConnectionManager: Peer $peer responded with valid protocol response (notfound/no headers), not recording error")
             }
         }
         
-        Log.w("HNSGo", "ConnectionManager: Failed to sync from all peers (max network height seen: $maxNetworkHeight)")
         return@withContext SyncResult(false, maxNetworkHeight)
     }
 }

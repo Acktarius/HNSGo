@@ -48,7 +48,6 @@ object HeaderSync {
             for (header in headerChain) {
                 headerHashes.add(HashWrapper(header.hash()))
             }
-            android.util.Log.d("HNSGo", "HeaderSync: Initialized HashSet with ${headerHashes.size} header hashes")
         }
     }
     
@@ -63,15 +62,13 @@ object HeaderSync {
         onHeaderAdded: (Header, Int) -> Unit,  // Header and its actual height
         saveHeaders: suspend () -> Unit,
         knownNetworkHeight: Int? = null  // Optional: if we know network height, reject headers ahead of it
-    ): Int? = withContext(Dispatchers.IO) {
-        android.util.Log.d("HNSGo", "HeaderSync: Starting P2P header sync...")
+    ): Int? = withContext(Config.HEADER_SYNC_DISPATCHER) {
         
         val startHeight = getChainHeight()
         
         // Initialize HashSet if empty (first sync after loading from disk)
         synchronized(headerHashes) {
             if (headerHashes.isEmpty() && headerChain.isNotEmpty()) {
-                android.util.Log.d("HNSGo", "HeaderSync: HashSet empty, initializing from ${headerChain.size} headers")
                 for (header in headerChain) {
                     headerHashes.add(HashWrapper(header.hash()))
                 }
@@ -82,7 +79,6 @@ object HeaderSync {
             headerChain.toList()
         }
         
-        android.util.Log.d("HNSGo", "HeaderSync: Building locator from ${headerChainSnapshot.size} headers at height $startHeight")
         if (headerChainSnapshot.isNotEmpty()) {
             val lastHeader = headerChainSnapshot.last()
             val lastHash = lastHeader.hash()
@@ -91,17 +87,14 @@ object HeaderSync {
             val prevBlockHex = lastHeader.prevBlock.take(16).joinToString("") { byte -> "%02x".format(byte) }
             val nameRootHex = lastHeader.nameRoot.take(16).joinToString("") { byte -> "%02x".format(byte) }
             val maskHex = lastHeader.mask.take(16).joinToString("") { byte -> "%02x".format(byte) }
-            android.util.Log.e("HNSGo", "HeaderSync: Tip header hash=$hashHex zero=$hashIsZero prevBlock=$prevBlockHex nameRoot=$nameRootHex mask=$maskHex")
         }
         
         val locatorHashes = ChainLocator.buildLocatorList(headerChainSnapshot, startHeight, firstInMemoryHeight)
         
         val checkpointEndHeight = Config.CHECKPOINT_HEIGHT + 150 - 1
         if (startHeight <= checkpointEndHeight) {
-            android.util.Log.d("HNSGo", "HeaderSync: Syncing from checkpoint range (height $startHeight, checkpoint ends at $checkpointEndHeight)")
         }
         
-        android.util.Log.d("HNSGo", "HeaderSync: Built locator with ${locatorHashes.size} hashes from height $startHeight")
         
         var newHeadersCount = 0
         // Track current height locally to avoid issues with getChainHeight() closure timing
@@ -139,7 +132,6 @@ object HeaderSync {
                 if (isCurrentTip) {
                     // This is our current tip - skip it, we need headers AFTER it
                     // Continue processing - there might be new headers after this in the batch
-                    android.util.Log.d("HNSGo", "HeaderSync: Skipping header - this is our current tip (height $localCurrentHeight), continuing to find headers after it")
                     false  // Reject but continue processing batch
                 } else if (!connectsToTip) {
                     // This header doesn't connect to our tip
@@ -147,13 +139,11 @@ object HeaderSync {
                     // If it's old, continue processing - there might be new headers later in the batch
                     // If it's a mismatch, we should stop, but we can't distinguish easily
                     // So we'll continue processing and let validateHeader catch chain mismatches
-                    android.util.Log.d("HNSGo", "HeaderSync: Rejecting header - doesn't connect to tip (prevBlock mismatch). Expected height: $expectedHeight. Continuing to check for new headers in batch...")
                     false  // Reject but continue processing batch
                 } else {
                     // CRITICAL: Reject headers that are ahead of known network height (matching hnsd behavior)
                     // hnsd/hsd only accept headers up to the network height to prevent being ahead
                     if (knownNetworkHeight != null && expectedHeight > knownNetworkHeight) {
-                        android.util.Log.d("HNSGo", "HeaderSync: Rejecting header at height $expectedHeight - ahead of known network height $knownNetworkHeight (matching hnsd behavior)")
                         false  // Reject but continue processing batch
                     } else {
                         // Second check: validate the header (duplicate check, etc.)
@@ -182,8 +172,6 @@ object HeaderSync {
                                 }
                                 // Calculate new firstInMemoryHeight after trimming
                                 val newFirstInMemory = localCurrentHeight - headerChain.size + 1
-                                android.util.Log.d("HNSGo", "HeaderSync: Trimmed $removeCount old headers from memory and HashSet")
-                                android.util.Log.d("HNSGo", "HeaderSync: After trimming: chainHeight=$localCurrentHeight, chainSize=${headerChain.size}, firstInMemory should be $newFirstInMemory")
                             }
                         }
                         
@@ -204,11 +192,8 @@ object HeaderSync {
         if (networkHeightFromSync != null) {
             val behind = networkHeightFromSync - finalHeight
             if (behind > 0) {
-                android.util.Log.d("HNSGo", "HeaderSync: Network height: $networkHeightFromSync, our height: $finalHeight (behind by $behind blocks)")
             } else if (behind < 0) {
-                android.util.Log.d("HNSGo", "HeaderSync: Network height: $networkHeightFromSync, our height: $finalHeight (ahead by ${-behind} blocks - within tolerance)")
             } else {
-                android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (exact match)")
             }
         }
         
@@ -221,17 +206,13 @@ object HeaderSync {
                                  headerChain.size % Config.HEADER_SAVE_CHAIN_INTERVAL == 0
                 if (shouldSave) {
                     saveHeaders()
-                    android.util.Log.d("HNSGo", "HeaderSync: Saved headers to disk (progress preserved)")
                 }
-                android.util.Log.d("HNSGo", "HeaderSync: Synced $newHeadersCount new headers")
             }
             !syncResult.success -> {
                 android.util.Log.w("HNSGo", "HeaderSync: P2P header sync failed - peers may not have headers from checkpoint")
                 android.util.Log.w("HNSGo", "HeaderSync: This is normal if peers have pruned old headers")
-                android.util.Log.d("HNSGo", "HeaderSync: Background sync will retry immediately with next peer")
             }
             else -> {
-                android.util.Log.d("HNSGo", "HeaderSync: No new headers to sync")
             }
         }
         
@@ -246,7 +227,7 @@ object HeaderSync {
         getChainHeight: () -> Int,
         syncHeaders: suspend () -> Int?,
         saveHeaders: suspend () -> Unit
-    ): Int? = withContext(Dispatchers.IO) {
+    ): Int? = withContext(Config.HEADER_SYNC_DISPATCHER) {
         var networkHeight: Int? = null
         val maxIterations = 1000
         var iteration = 0
@@ -254,7 +235,6 @@ object HeaderSync {
         while (iteration < maxIterations) {
             iteration++
             val heightBeforeSync = getChainHeight()
-            android.util.Log.d("HNSGo", "HeaderSync: Continuing background header sync from height $heightBeforeSync... (iteration $iteration)")
             
             val syncResult = syncHeaders()
             networkHeight = syncResult ?: networkHeight
@@ -271,24 +251,17 @@ object HeaderSync {
                 
                 if (isCaughtUp) {
                     if (behind < 0) {
-                        android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (height: $currentHeight, network: $networkHeight, ahead by ${-behind} blocks - within tolerance)")
                     } else {
-                        android.util.Log.d("HNSGo", "HeaderSync: Caught up with network! (height: $currentHeight, network: $networkHeight, behind by $behind blocks)")
                     }
                     break
                 }
                 if (headersReceived) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Synced $newHeadersCount headers, still behind by $behind blocks, continuing sync...")
                 } else {
-                    android.util.Log.d("HNSGo", "HeaderSync: No new headers received, still behind by $behind blocks")
                 }
             } else {
                 if (headersReceived) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Synced $newHeadersCount headers (no network height available), continuing...")
                 } else {
-                    android.util.Log.d("HNSGo", "HeaderSync: No network height and no new headers, checking if sync should continue...")
                     if (iteration >= 5) {
-                        android.util.Log.d("HNSGo", "HeaderSync: No network height after $iteration attempts, stopping background sync")
                         break
                     }
                 }
@@ -296,13 +269,10 @@ object HeaderSync {
             
             val isSynced = networkHeight != null && (networkHeight - currentHeight) <= 10
             if (isSynced && !headersReceived && iteration > 1) {
-                android.util.Log.d("HNSGo", "HeaderSync: Already synced, no new blocks - waiting 5 minutes before retry")
                 delay(5 * 60 * 1000L)
             } else if (!headersReceived) {
-                android.util.Log.d("HNSGo", "HeaderSync: No headers from peers, retrying immediately")
                 delay(2000)
             } else {
-                android.util.Log.d("HNSGo", "HeaderSync: Got headers, continuing immediately")
                 delay(500)
             }
         }
@@ -328,7 +298,6 @@ object HeaderSync {
         
         synchronized(headerChain) {
             if (headerChain.isEmpty()) {
-                android.util.Log.d("HNSGo", "HeaderSync: Accepting first header (chain was empty)")
                 return true
             }
             
@@ -345,8 +314,6 @@ object HeaderSync {
                     val lastHashHex = lastHash.joinToString("") { "%02x".format(it) }
                     val prevBlockHex = header.prevBlock.joinToString("") { "%02x".format(it) }
                     android.util.Log.w("HNSGo", "HeaderSync: Header prevBlock mismatch at height $expectedHeight (CHAIN CONNECTION FAILURE)")
-                    android.util.Log.w("HNSGo", "HeaderSync: Expected prevBlock (last hash): ${lastHashHex.take(16)}...")
-                    android.util.Log.w("HNSGo", "HeaderSync: Got prevBlock: ${prevBlockHex.take(16)}...")
                 }
                 return false
             }
@@ -358,7 +325,6 @@ object HeaderSync {
                     android.util.Log.e("HNSGo", "HeaderSync: CRITICAL - First post-checkpoint header doesn't match checkpoint!")
                     android.util.Log.e("HNSGo", "HeaderSync: This indicates checkpoint mismatch or chain reorganization")
                 } else {
-                    android.util.Log.d("HNSGo", "HeaderSync: First post-checkpoint header matches checkpoint - chain is valid")
                 }
             }
             
@@ -367,7 +333,6 @@ object HeaderSync {
             synchronized(headerHashes) {
                 if (headerHashes.contains(hashWrapper)) {
                     val hashHex = headerHash.joinToString("") { "%02x".format(it) }
-                    android.util.Log.d("HNSGo", "HeaderSync: Duplicate header detected at height $expectedHeight (hash: ${hashHex.take(16)}...) - skipping")
                     return false
                 }
             }

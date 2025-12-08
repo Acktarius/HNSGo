@@ -85,18 +85,15 @@ object ResourceRecord {
                 Config.HSK_SYNTH6 -> addSynth6Record(rec, dnsRecords)
                 Config.HSK_TEXT -> addTextRecord(rec, dnsRecords)
                 else -> {
-                    Log.d("HNSGo", "ResourceRecord: Unknown resource record type: ${rec.type}")
                 }
             }
         }
         
-        Log.d("HNSGo", "ResourceRecord: Converted ${blockchainRecords.size} Handshake records to ${dnsRecords.size} DNS records")
         return dnsRecords
     }
     
     private fun addNSRecord(rec: com.acktarius.hnsgo.Record, dnsRecords: MutableList<com.acktarius.hnsgo.Record>) {
         val nameserver = String(rec.data, Charsets.UTF_8).trim()
-        Log.d("HNSGo", "ResourceRecord: Found NS record: $nameserver")
         dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_NS, nameserver.toByteArray(Charsets.UTF_8)))
     }
     
@@ -117,12 +114,10 @@ object ResourceRecord {
                 val ip = InetAddress.getByAddress(rec.data)
                 val ipStr = ip.hostAddress
                 if (ipStr != null) {
-                    Log.d("HNSGo", "ResourceRecord: Found GLUE4 record (old format): $ipStr")
                     dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_A, ipStr.toByteArray(Charsets.UTF_8)))
                 }
                 return
             }
-            Log.w("HNSGo", "ResourceRecord: Invalid GLUE4 record format: ${rec.data.size} bytes")
             return
         }
         
@@ -131,7 +126,6 @@ object ResourceRecord {
         val ip = InetAddress.getByAddress(ipBytes)
         val ipStr = ip.hostAddress
         if (ipStr != null) {
-            Log.d("HNSGo", "ResourceRecord: Found GLUE4 record: $name -> $ipStr")
             // Store as: name + null + IP string (for matching to NS records)
             val nameBytes = name.toByteArray(Charsets.UTF_8)
             val ipStrBytes = ipStr.toByteArray(Charsets.UTF_8)
@@ -141,7 +135,6 @@ object ResourceRecord {
             System.arraycopy(ipStrBytes, 0, recordData, nameBytes.size + 1, ipStrBytes.size)
             dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_A, recordData))
         } else {
-            Log.w("HNSGo", "ResourceRecord: Failed to get host address for GLUE4 record: $name")
         }
     }
     
@@ -162,12 +155,10 @@ object ResourceRecord {
                 val ip = InetAddress.getByAddress(rec.data)
                 val ipStr = ip.hostAddress
                 if (ipStr != null) {
-                    Log.d("HNSGo", "ResourceRecord: Found GLUE6 record (old format): $ipStr")
                     dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_AAAA, ipStr.toByteArray(Charsets.UTF_8)))
                 }
                 return
             }
-            Log.w("HNSGo", "ResourceRecord: Invalid GLUE6 record format: ${rec.data.size} bytes")
             return
         }
         
@@ -176,7 +167,6 @@ object ResourceRecord {
         val ip = InetAddress.getByAddress(ipBytes)
         val ipStr = ip.hostAddress
         if (ipStr != null) {
-            Log.d("HNSGo", "ResourceRecord: Found GLUE6 record: $name -> $ipStr")
             // Store as: name + null + IP string (for matching to NS records)
             val nameBytes = name.toByteArray(Charsets.UTF_8)
             val ipStrBytes = ipStr.toByteArray(Charsets.UTF_8)
@@ -186,12 +176,10 @@ object ResourceRecord {
             System.arraycopy(ipStrBytes, 0, recordData, nameBytes.size + 1, ipStrBytes.size)
             dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_AAAA, recordData))
         } else {
-            Log.w("HNSGo", "ResourceRecord: Failed to get host address for GLUE6 record: $name")
         }
     }
     
     private fun addDSRecord(rec: com.acktarius.hnsgo.Record, dnsRecords: MutableList<com.acktarius.hnsgo.Record>) {
-        Log.d("HNSGo", "ResourceRecord: Found DS record (${rec.data.size} bytes)")
         dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_DS, rec.data))
     }
     
@@ -205,13 +193,10 @@ object ResourceRecord {
             val ip = InetAddress.getByAddress(ipBytes)
             val ipStr = ip.hostAddress
             if (ipStr != null) {
-                Log.d("HNSGo", "ResourceRecord: Found SYNTH4 record: $name -> $ipStr")
                 dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_A, ipStr.toByteArray(Charsets.UTF_8)))
             } else {
-                Log.w("HNSGo", "ResourceRecord: Failed to get host address for SYNTH4 record")
             }
         } else {
-            Log.w("HNSGo", "ResourceRecord: Failed to decode SYNTH4 IP from name: $name")
         }
     }
     
@@ -225,13 +210,10 @@ object ResourceRecord {
             val ip = InetAddress.getByAddress(ipBytes)
             val ipStr = ip.hostAddress
             if (ipStr != null) {
-                Log.d("HNSGo", "ResourceRecord: Found SYNTH6 record: $name -> $ipStr")
                 dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_AAAA, ipStr.toByteArray(Charsets.UTF_8)))
             } else {
-                Log.w("HNSGo", "ResourceRecord: Failed to get host address for SYNTH6 record")
             }
         } else {
-            Log.w("HNSGo", "ResourceRecord: Failed to decode SYNTH6 IP from name: $name")
         }
     }
     
@@ -251,13 +233,11 @@ object ResourceRecord {
         // For now, return null to indicate we need proper base32 decoding
         // This matches hnsd's pointer_to_ip which decodes base32-encoded names
         // The format is typically: base32(IP) + checksum or similar
-        Log.w("HNSGo", "ResourceRecord: SYNTH name decoding not yet implemented: $name")
         return null
     }
     
     private fun addTextRecord(rec: com.acktarius.hnsgo.Record, dnsRecords: MutableList<com.acktarius.hnsgo.Record>) {
         val text = String(rec.data, Charsets.UTF_8).trim()
-        Log.d("HNSGo", "ResourceRecord: Found TEXT record: $text")
         dnsRecords.add(com.acktarius.hnsgo.Record(Config.HSK_DNS_TXT, text.toByteArray(Charsets.UTF_8)))
     }
 }

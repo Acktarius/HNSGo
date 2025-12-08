@@ -86,16 +86,8 @@ internal object MessageHandler {
         // For getproof messages, log the complete wire format for byte-for-byte comparison
         if (command == "getproof") {
             val messageHex = message.joinToString("") { "%02x".format(it) }
-            Log.w("HNSGo", "MessageHandler: ========== GETPROOF COMPLETE MESSAGE ==========")
-            Log.w("HNSGo", "MessageHandler: Total message size: ${message.size} bytes")
-            Log.w("HNSGo", "MessageHandler: Message bytes (hex): $messageHex")
             val magicBytes = message.slice(0..3).joinToString("") { "%02x".format(it) }
             val expectedMagic = "d3f26e5b"  // 0x5b6ef2d3 in little-endian: d3 f2 6e 5b
-            Log.w("HNSGo", "MessageHandler: Magic (bytes 0-3): $magicBytes (expected: $expectedMagic, match: ${magicBytes == expectedMagic})")
-            Log.w("HNSGo", "MessageHandler: Command (byte 4): ${"%02x".format(message[4].toInt() and 0xFF)} (expected: 1a for GETPROOF)")
-            Log.w("HNSGo", "MessageHandler: Payload size (bytes 5-8): ${message.slice(5..8).joinToString("") { "%02x".format(it) }} (expected: 40000000 = 64 in little-endian)")
-            Log.w("HNSGo", "MessageHandler: Payload (bytes 9-72): ${message.slice(9 until message.size).joinToString("") { "%02x".format(it) }}")
-            Log.w("HNSGo", "MessageHandler: ==============================================")
         }
         
         output.write(message)
@@ -114,7 +106,6 @@ internal object MessageHandler {
             while (read < 9) {
                 val elapsed = System.currentTimeMillis() - headerStartTime
                 if (elapsed > headerTimeout) {
-                    Log.w("HNSGo", "MessageHandler: Timeout reading message header (${elapsed}ms)")
                     return@withContext null
                 }
                 
@@ -129,7 +120,6 @@ internal object MessageHandler {
             
             val magic = readInt32(header, 0)
             if (magic != MAGIC_MAINNET) {
-                Log.w("HNSGo", "MessageHandler: Invalid magic: 0x${magic.toString(16)} (expected: 0x${MAGIC_MAINNET.toString(16)})")
                 return@withContext null
             }
             
@@ -137,7 +127,6 @@ internal object MessageHandler {
             val length = readInt32(header, 5)
             
             if (length > Config.MAX_MESSAGE_SIZE) {
-                Log.w("HNSGo", "MessageHandler: Message too large: $length bytes (max: ${Config.MAX_MESSAGE_SIZE})")
                 return@withContext null
             }
             
@@ -153,7 +142,6 @@ internal object MessageHandler {
             while (read < length) {
                 val elapsed = System.currentTimeMillis() - payloadStartTime
                 if (elapsed > payloadTimeout) {
-                    Log.w("HNSGo", "MessageHandler: Timeout reading payload (read $read of $length bytes in ${elapsed}ms)")
                     return@withContext null
                 }
                 
@@ -161,7 +149,6 @@ internal object MessageHandler {
                 // Socket timeout is set to 30 seconds, so this will throw SocketTimeoutException if no data
                 val n = input.read(payload, read, length - read)
                 if (n == -1) {
-                    Log.w("HNSGo", "MessageHandler: EOF while reading payload (read $read of $length bytes)")
                     return@withContext null
                 }
                 read += n
@@ -169,13 +156,10 @@ internal object MessageHandler {
             
             return@withContext P2PMessage(command, payload)
         } catch (e: java.net.SocketTimeoutException) {
-            Log.w("HNSGo", "MessageHandler: Socket timeout while receiving message", e)
             return@withContext null
         } catch (e: java.io.IOException) {
-            Log.w("HNSGo", "MessageHandler: I/O error receiving message: ${e.message}")
             return@withContext null
         } catch (e: Exception) {
-            Log.e("HNSGo", "MessageHandler: Error receiving message", e)
             return@withContext null
         }
     }
@@ -198,7 +182,6 @@ internal object MessageHandler {
     fun parseProofMessage(payload: ByteArray): Pair<List<ByteArray>, ByteArray?> {
         try {
             if (payload.size < 64) {
-                Log.w("HNSGo", "MessageHandler: Proof message too short: ${payload.size} bytes (need at least 64)")
                 return Pair(emptyList(), null)
             }
             
@@ -209,7 +192,6 @@ internal object MessageHandler {
             val proofBytes = ByteArray(buffer.remaining()).apply { buffer.get(this) }
             return Pair(emptyList(), proofBytes)
         } catch (e: Exception) {
-            Log.e("HNSGo", "MessageHandler: Error parsing proof message", e)
             return Pair(emptyList(), null)
         }
     }
@@ -223,7 +205,6 @@ internal object MessageHandler {
             
             for (i in 0 until count) {
                 if (buffer.remaining() < 236) {
-                    Log.w("HNSGo", "MessageHandler: Not enough data for header $i (remaining: ${buffer.remaining()})")
                     break
                 }
                 val headerBytes = ByteArray(236).apply { buffer.get(this) }
@@ -231,7 +212,6 @@ internal object MessageHandler {
                 headers.add(header)
             }
         } catch (e: Exception) {
-            Log.e("HNSGo", "MessageHandler: Error parsing headers", e)
         }
         
         return headers

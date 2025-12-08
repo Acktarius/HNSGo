@@ -19,7 +19,6 @@ object PeerStorage {
     suspend fun loadPeers(dataDir: File): List<String> = withContext(Dispatchers.IO) {
         val peersFile = File(dataDir, Config.PEERS_FILE)
         if (!peersFile.exists()) {
-            Log.d("PeerStorage", "No persisted peers file found")
             return@withContext emptyList()
         }
         
@@ -37,11 +36,9 @@ object PeerStorage {
                         peers.add(peer)
                     }
                 }
-                Log.d("PeerStorage", "Loaded ${peers.size} persisted peers")
                 return@withContext peers
             }
         } catch (e: Exception) {
-            Log.e("PeerStorage", "Error loading persisted peers", e)
         }
         
         return@withContext emptyList()
@@ -73,9 +70,7 @@ object PeerStorage {
             tempFile.writeBytes(data)
             tempFile.renameTo(peersFile)
             
-            Log.d("PeerStorage", "Saved ${peersArray.size()} peers to disk")
         } catch (e: Exception) {
-            Log.e("PeerStorage", "Error saving peers", e)
         }
     }
     
@@ -94,7 +89,6 @@ object PeerStorage {
         val peersToSave = existingPeers.take(50).toList()
         savePeers(dataDir, peersToSave)
         
-        Log.d("PeerStorage", "Added successful peer: $peer (total: ${peersToSave.size})")
     }
 }
 

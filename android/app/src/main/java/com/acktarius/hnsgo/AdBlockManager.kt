@@ -24,16 +24,17 @@ object AdBlockManager {
     private const val PREFS_KEY_PRIVACY_MODE = "privacy_mode"
     
     // Known ad block list sources (using popular, well-maintained lists)
-    // Base lists: good balance of blocking and compatibility
+    // BASE lists: Used when ad blocking (toggle 1) is enabled
+    // Good balance of blocking and compatibility
     private val BASE_BLACKLIST_URLS = listOf(
         "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
         "https://someonewhocares.org/hosts/zero/hosts"
     )
     
-    // Privacy/strict mode: additional lists for stricter telemetry blocking
+    // PRIVACY lists: Additional lists added when privacy mode (toggle 2) is enabled
+    // Only used when both toggle 1 (ad blocking) AND toggle 2 (privacy) are ON
     // OISD (OISD Blocklist) - comprehensive, well-maintained, blocks ads + telemetry
-    // Many people report "OISD + AdGuard DNS filter" as a sweet spot for strong blocking
-    // without too much breakage.
+
     private val PRIVACY_BLACKLIST_URLS = listOf(
         "https://dbl.oisd.nl/basic/",  // OISD Basic - good balance
         "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"  // AdGuard DNS filter
@@ -41,13 +42,19 @@ object AdBlockManager {
         // "https://dbl.oisd.nl/"  // OISD Full - very strict, may break some sites
     )
     
-    // Combined list - can be toggled between base and privacy mode
+    // Privacy mode state - only meaningful when ad blocking is enabled
     private var usePrivacyMode = false
     
     /**
      * Get the active blacklist URLs based on current mode
+     * - If ad blocking disabled: returns empty list (blocking is disabled)
+     * - If ad blocking enabled + privacy disabled: returns BASE_BLACKLIST_URLS
+     * - If ad blocking enabled + privacy enabled: returns BASE_BLACKLIST_URLS + PRIVACY_BLACKLIST_URLS
      */
     private fun getBlacklistUrls(): List<String> {
+        if (!enabled) {
+            return emptyList()
+        }
         return if (usePrivacyMode) {
             BASE_BLACKLIST_URLS + PRIVACY_BLACKLIST_URLS
         } else {
@@ -57,11 +64,15 @@ object AdBlockManager {
     
     /**
      * Enable privacy mode (stricter blocking with additional lists)
+     * Note: Privacy mode only works when ad blocking is enabled
+     * When enabled, adds PRIVACY_BLACKLIST_URLS to BASE_BLACKLIST_URLS
      */
     fun setPrivacyMode(enabled: Boolean) {
+        if (enabled && !this.enabled) {
+            return
+        }
         usePrivacyMode = enabled
         savePrivacyModeState()
-        Log.d("HNSGo", "AdBlockManager: Privacy mode ${if (enabled) "enabled" else "disabled"}")
     }
     
     /**
@@ -112,11 +123,9 @@ object AdBlockManager {
         val newBlockedDomains = mutableSetOf<String>()
         val urls = getBlacklistUrls()
         
-        Log.d("HNSGo", "AdBlockManager: Refreshing blacklist (privacy mode: $usePrivacyMode, ${urls.size} sources)")
         
         for (urlString in urls) {
             try {
-                Log.d("HNSGo", "AdBlockManager: Fetching blacklist from $urlString")
                 val url = URL(urlString)
                 val connection = url.openConnection()
                 connection.connectTimeout = 10000
@@ -129,9 +138,7 @@ object AdBlockManager {
                     }
                 }
                 
-                Log.d("HNSGo", "AdBlockManager: Loaded ${newBlockedDomains.size} domains from $urlString")
             } catch (e: Exception) {
-                Log.w("HNSGo", "AdBlockManager: Failed to fetch from $urlString: ${e.message}")
                 // Continue with other sources
             }
         }
@@ -146,7 +153,6 @@ object AdBlockManager {
         
         enabled = true
         saveEnabledState()
-        Log.d("HNSGo", "AdBlockManager: Blacklist refreshed, total domains: ${blockedDomains.size}")
     }
     
     /**
@@ -162,9 +168,7 @@ object AdBlockManager {
                     writer.newLine()
                 }
             }
-            Log.d("HNSGo", "AdBlockManager: Saved ${domains.size} domains to ${file.absolutePath}")
         } catch (e: Exception) {
-            Log.e("HNSGo", "AdBlockManager: Failed to save blacklist to storage", e)
         }
     }
     
@@ -176,7 +180,6 @@ object AdBlockManager {
         try {
             val file = File(ctx.filesDir, BLACKLIST_FILE)
             if (!file.exists()) {
-                Log.d("HNSGo", "AdBlockManager: No saved blacklist found, will download on first enable")
                 return
             }
             
@@ -195,9 +198,7 @@ object AdBlockManager {
                 blockedDomains.addAll(loadedDomains)
             }
             
-            Log.d("HNSGo", "AdBlockManager: Loaded ${blockedDomains.size} domains from storage")
         } catch (e: Exception) {
-            Log.e("HNSGo", "AdBlockManager: Failed to load blacklist from storage", e)
         }
     }
     
@@ -210,7 +211,6 @@ object AdBlockManager {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(PREFS_KEY_ENABLED, enabled).apply()
         } catch (e: Exception) {
-            Log.e("HNSGo", "AdBlockManager: Failed to save enabled state", e)
         }
     }
     
@@ -222,9 +222,7 @@ object AdBlockManager {
         try {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             enabled = prefs.getBoolean(PREFS_KEY_ENABLED, false)
-            Log.d("HNSGo", "AdBlockManager: Loaded enabled state: $enabled")
         } catch (e: Exception) {
-            Log.e("HNSGo", "AdBlockManager: Failed to load enabled state", e)
         }
     }
     
@@ -237,7 +235,6 @@ object AdBlockManager {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(PREFS_KEY_PRIVACY_MODE, usePrivacyMode).apply()
         } catch (e: Exception) {
-            Log.e("HNSGo", "AdBlockManager: Failed to save privacy mode state", e)
         }
     }
     
@@ -249,9 +246,7 @@ object AdBlockManager {
         try {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             usePrivacyMode = prefs.getBoolean(PREFS_KEY_PRIVACY_MODE, false)
-            Log.d("HNSGo", "AdBlockManager: Loaded privacy mode state: $usePrivacyMode")
         } catch (e: Exception) {
-            Log.e("HNSGo", "AdBlockManager: Failed to load privacy mode state", e)
         }
     }
     
@@ -286,14 +281,16 @@ object AdBlockManager {
     /**
      * Disable ad blocking
      * Note: Blacklist file is kept on disk for faster re-enable, but cleared from memory
+     * Also disables privacy mode when ad blocking is disabled
      */
     fun disable() {
         enabled = false
+        usePrivacyMode = false  // Privacy mode requires ad blocking to be enabled
         synchronized(blockedDomains) {
             blockedDomains.clear()
         }
         saveEnabledState()
-        Log.d("HNSGo", "AdBlockManager: Ad blocking disabled, blacklist cleared from memory")
+        savePrivacyModeState()
     }
     
     /**

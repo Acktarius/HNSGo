@@ -88,7 +88,6 @@ object Proof {
             val depth = field and 0x3FFF  // ~(3 << 14)
             
             if (depth > 256) {
-                Log.w("HNSGo", "Proof: Invalid depth: $depth")
                 return null
             }
             
@@ -97,7 +96,6 @@ object Proof {
             val count = buffer.short.toInt() and 0xFFFF
             
             if (count > 256) {
-                Log.w("HNSGo", "Proof: Invalid node count: $count")
                 return null
             }
             
@@ -129,7 +127,6 @@ object Proof {
                     }
                     
                     if (size == 0 || size > 256) {
-                        Log.w("HNSGo", "Proof: Invalid prefix size: $size")
                         return null
                     }
                     
@@ -208,7 +205,6 @@ object Proof {
                     valueSize = buffer.short.toInt() and 0xFFFF
                     
                     if (valueSize > Config.MAX_DATA_SIZE) {
-                        Log.w("HNSGo", "Proof: Value size too large: $valueSize")
                         return null
                     }
                     
@@ -217,7 +213,6 @@ object Proof {
                     buffer.get(value)
                 }
                 else -> {
-                    Log.w("HNSGo", "Proof: Unknown proof type: $type")
                     return null
                 }
             }
@@ -236,7 +231,6 @@ object Proof {
                 valueSize = valueSize
             )
         } catch (e: Exception) {
-            Log.e("HNSGo", "Proof: Error parsing proof", e)
             return null
         }
     }
@@ -336,7 +330,6 @@ object Proof {
         
         // Verify final hash matches root
         if (!next.contentEquals(root)) {
-            Log.w("HNSGo", "Proof: Hash mismatch - calculated: ${next.take(16).joinToString("") { "%02x".format(it) }}..., expected: ${root.take(16).joinToString("") { "%02x".format(it) }}...")
             return VerifyResult(false, false, errorCode = HSK_EHASHMISMATCH)
         }
         
@@ -476,7 +469,6 @@ object Proof {
             
             return resData
         } catch (e: Exception) {
-            Log.e("HNSGo", "Proof: Error parsing name state", e)
             return null
         }
     }

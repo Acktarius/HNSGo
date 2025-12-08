@@ -22,10 +22,8 @@ internal object ChainLocator {
     fun buildLocatorList(headerChain: List<Header>, currentHeight: Int, firstInMemoryHeight: Int? = null): List<ByteArray> {
         val locator = mutableListOf<ByteArray>()
         
-        Log.d("HNSGo", "ChainLocator:buildLocatorList: Called with height=$currentHeight, chainSize=${headerChain.size}, firstInMemoryHeight=$firstInMemoryHeight")
         
         if (headerChain.isEmpty() || currentHeight <= 0) {
-            Log.e("HNSGo", "ChainLocator:buildLocatorList: No headers! size=${headerChain.size}, height=$currentHeight")
             return locator
         }
         
@@ -36,7 +34,6 @@ internal object ChainLocator {
         // Otherwise, assume headerChain[0] is at checkpointHeight (for full chains)
         val actualFirstHeight = firstInMemoryHeight ?: checkpointHeight
         
-        Log.d("HNSGo", "ChainLocator:buildLocatorList: Using actualFirstHeight=$actualFirstHeight (checkpoint=$checkpointHeight)")
         
         // Headers are stored in order from actualFirstHeight
         // headerChain[0] = height actualFirstHeight
@@ -73,9 +70,7 @@ internal object ChainLocator {
             val tipHash = tipHeader.hash()
             locator.add(tipHash)
             i++
-            Log.d("HNSGo", "ChainLocator:buildLocatorList: Added tip hash at h=$height idx=$tipIndex (firstInMemory=$actualFirstHeight)")
         } else {
-            Log.e("HNSGo", "ChainLocator:buildLocatorList: Tip index OOB h=$height firstInMemory=$actualFirstHeight idx=$tipIndex size=${headerChain.size}")
             return locator // Can't build locator without tip
         }
         
@@ -112,7 +107,6 @@ internal object ChainLocator {
                 if (height == 0) {
                     locator.add(ByteArray(32))  // Genesis hash (all zeros)
                     i++
-                    Log.d("HNSGo", "ChainLocator:buildLocatorList: Added genesis hash (all zeros)")
                 }
                 continue
             }
@@ -123,7 +117,6 @@ internal object ChainLocator {
                 val hash = header.hash()
                 locator.add(hash)
                 i++
-                Log.d("HNSGo", "ChainLocator:buildLocatorList: Added locator hash at h=$height idx=$index")
             }
             // If header is missing, continue (matching hnsd's continue behavior)
         }

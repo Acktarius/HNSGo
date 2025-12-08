@@ -32,7 +32,6 @@ object HeaderStorage {
         
         // Load from main file (now saves only latest 150 headers, matching hnsd)
         if (!headersFile.exists()) {
-            android.util.Log.d("HNSGo", "HeaderStorage: No existing header chain found")
             return@withContext Pair(0, Config.CHECKPOINT_HEIGHT)
         }
         
@@ -94,16 +93,6 @@ object HeaderStorage {
         val startIndex = maxOf(0, totalCount - maxInMemoryHeaders)
         val firstInMemoryHeight = chainHeight - totalCount + 1 + startIndex
         
-        android.util.Log.d(
-            "HNSGo",
-            "HeaderStorage: Loading from disk (total: $totalCount headers, height: $chainHeight)"
-        )
-        android.util.Log.d(
-            "HNSGo",
-            "HeaderStorage: Loading last ${totalCount - startIndex} headers into memory " +
-                "(array indices $startIndex to ${totalCount - 1}, heights $firstInMemoryHeight to $chainHeight)"
-        )
-        
         synchronized(headerChain) {
             for (i in startIndex until totalCount) {
                 val headerObj = headersArray[i]
@@ -112,12 +101,6 @@ object HeaderStorage {
                 headerChain.add(header)
             }
         }
-        
-        android.util.Log.d(
-            "HNSGo",
-            "HeaderStorage: Loaded ${headerChain.size} headers into memory " +
-                "(heights $firstInMemoryHeight to $chainHeight, matching hnsd: only latest headers saved)"
-        )
         
         firstInMemoryHeight
     }
@@ -140,7 +123,6 @@ object HeaderStorage {
             
             val newHeadersCount = chainHeight - lastSavedHeight
             if (newHeadersCount <= 0) {
-                android.util.Log.d("HNSGo", "HeaderStorage: No new headers to save (height: $chainHeight, lastSaved: $lastSavedHeight)")
                 return@withContext
             }
             
@@ -179,12 +161,10 @@ object HeaderStorage {
                 sha256.reset()
                 File(dataDir, Config.HEADERS_CHECKSUM).writeBytes(checksum)
                 
-                android.util.Log.d("HNSGo", "HeaderStorage: Saved ${headersToSave.size} latest headers (matching hnsd: only latest ${Config.CHECKPOINT_HEADERS_COUNT} headers, height: $chainHeight)")
                 
                 // Clean up old incremental file if it exists (no longer needed)
                 if (incrementalFile.exists()) {
                     incrementalFile.delete()
-                    android.util.Log.d("HNSGo", "HeaderStorage: Cleaned up old incremental file")
                 }
             }
         } catch (e: OutOfMemoryError) {

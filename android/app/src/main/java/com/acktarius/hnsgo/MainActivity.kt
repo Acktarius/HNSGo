@@ -171,7 +171,6 @@ fun HnsGoScreen(act: MainActivity) {
     // Check certificate installation status on mount
     LaunchedEffect(Unit) {
         certInstalled = CertHelper.isCAInstalledSync(act)
-        Log.d("HNSGo", "Certificate installed status: $certInstalled")
         // Initialize AdBlockManager
         AdBlockManager.init(act)
         // Load saved enabled state
@@ -189,9 +188,7 @@ fun HnsGoScreen(act: MainActivity) {
                     // BroadcastReceiver callbacks run on main thread, so we can update state directly
                     debugQueryStatus = status
                     debugQueryResult = result
-                    Log.d("HNSGo", "MainActivity: Received debug query result - status: $status, result: $result")
                 } catch (e: Exception) {
-                    Log.e("HNSGo", "Error handling debug query result", e)
                 }
             }
         }
@@ -204,7 +201,6 @@ fun HnsGoScreen(act: MainActivity) {
                 act.registerReceiver(receiver, android.content.IntentFilter("com.acktarius.hnsgo.DEBUG_QUERY_RESULT"))
             }
         } catch (e: Exception) {
-            Log.e("HNSGo", "Error registering broadcast receiver", e)
         }
         
         // Cleanup on dispose
@@ -213,21 +209,17 @@ fun HnsGoScreen(act: MainActivity) {
                 act.unregisterReceiver(receiver)
             } catch (e: Exception) {
                 // Receiver might not be registered or already unregistered
-                Log.d("HNSGo", "Error unregistering receiver (may already be unregistered): ${e.message}")
             }
         }
     }
 
     LaunchedEffect(enabled) {
-        Log.d("HNSGo", "LaunchedEffect triggered, enabled=$enabled")
         if (enabled) {
-            Log.d("HNSGo", "Toggle is ON, starting sync...")
             syncStatus = SyncStatus.SYNCING
             syncMessage = "Syncing headers..."
             
             scope.launch {
                 try {
-                    Log.d("HNSGo", "Starting SPV sync...")
                     // Configure resolver to use external Handshake resolver
                     SpvClient.setResolver(Config.DEBUG_RESOLVER_HOST, Config.DEBUG_RESOLVER_PORT)
                     SpvClient.init(act.filesDir, act)
@@ -240,11 +232,9 @@ fun HnsGoScreen(act: MainActivity) {
                         val behind = networkHeight - ourHeight
                         syncStatus = SyncStatus.SYNCING
                         syncMessage = "Syncing... ($ourHeight / $networkHeight)"
-                        Log.d("HNSGo", "SPV sync in progress: $ourHeight / $networkHeight (behind by $behind blocks)")
                     } else {
                         syncStatus = SyncStatus.SYNCED
                         syncMessage = "Sync complete"
-                        Log.d("HNSGo", "SPV sync completed successfully (height: $ourHeight)")
                     }
                     
                     // Continue syncing headers in background to catch up to network
@@ -299,12 +289,10 @@ fun HnsGoScreen(act: MainActivity) {
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.w("HNSGo", "Background sync error (non-critical): ${e.message}")
                         }
                     }
                     
                     // Start DoH server - debug query will happen in service after servers are ready
-                    Log.d("HNSGo", "Starting DoH service...")
                     ContextCompat.startForegroundService(act, Intent(act, DohService::class.java))
                     showGuidance = true
                     
@@ -312,7 +300,6 @@ fun HnsGoScreen(act: MainActivity) {
                     debugQueryStatus = "Waiting for DoH server..."
                     debugQueryResult = "Service starting, will test resolution when ready"
                 } catch (e: Exception) {
-                    Log.e("HNSGo", "Error during sync or service start", e)
                     syncStatus = SyncStatus.ERROR
                     syncMessage = "Sync failed: ${e.message}"
                 }
@@ -365,7 +352,6 @@ fun HnsGoScreen(act: MainActivity) {
                     onCheckedChange = { newValue ->
                         enabled = newValue
                         // Explicitly handle state change to avoid OVERRIDE_UNSET warning
-                        Log.d("HNSGo", "Switch state changed to: $newValue")
                     }
                 )
                 Spacer(Modifier.width(16.dp))
@@ -482,14 +468,11 @@ fun HnsGoScreen(act: MainActivity) {
                                         val success = CertHelper.saveCertToDownloads(act)
                                         if (success) {
                                             Toast.makeText(act, "Certificate saved to Downloads", Toast.LENGTH_SHORT).show()
-                                            Log.d("HNSGo", "Certificate saved to Downloads")
                                         } else {
                                             Toast.makeText(act, "Failed to save certificate", Toast.LENGTH_SHORT).show()
-                                            Log.e("HNSGo", "Failed to save certificate")
                                         }
                                     } catch (e: Exception) {
                                         Toast.makeText(act, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                        Log.e("HNSGo", "Error saving certificate", e)
                                     }
                                 },
                                 modifier = Modifier.height(28.dp)
@@ -530,12 +513,10 @@ fun HnsGoScreen(act: MainActivity) {
                                 try {
                                     CertHelper.openCertificateInstallSettings(act)
                                 } catch (e: Exception) {
-                                    Log.e("HNSGo", "Error opening settings", e)
                                     Toast.makeText(act, "Error opening settings", Toast.LENGTH_SHORT).show()
                                     try {
                                         act.startActivity(Intent(Settings.ACTION_SETTINGS))
                                     } catch (e2: Exception) {
-                                        Log.e("HNSGo", "Error opening fallback settings", e2)
                                     }
                                 }
                             },
@@ -605,7 +586,6 @@ fun HnsGoScreen(act: MainActivity) {
                                     CertHelper.markCertAsInstalled(act)
                                     certInstalled = true
                                     Toast.makeText(act, "Marked as installed", Toast.LENGTH_SHORT).show()
-                                    Log.d("HNSGo", "User marked certificate as installed")
                                 },
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -819,7 +799,6 @@ fun HnsGoScreen(act: MainActivity) {
                                             val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                                             clipboard.setPrimaryClip(clip)
                                             Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                            Log.d("HNSGo", "DoH URL copied to clipboard")
                                         }
                                 )
                                 IconButton(
@@ -828,7 +807,6 @@ fun HnsGoScreen(act: MainActivity) {
                                         val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
                                         clipboard.setPrimaryClip(clip)
                                         Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                        Log.d("HNSGo", "DoH URL copied to clipboard")
                                     },
                                     modifier = Modifier.size(24.dp)
                                 ) {
@@ -1016,7 +994,6 @@ fun HnsGoScreen(act: MainActivity) {
                                                     Toast.makeText(act, "Ad blocking enabled", Toast.LENGTH_SHORT).show()
                                                 }
                                             } catch (e: Exception) {
-                                                Log.e("HNSGo", "Error refreshing ad block blacklist", e)
                                                 withContext(Dispatchers.Main) {
                                                     adBlockingLoading = false
                                                     Toast.makeText(act, "Error loading blacklist: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1025,6 +1002,7 @@ fun HnsGoScreen(act: MainActivity) {
                                         }
                                     } else {
                                         AdBlockManager.disable()
+                                        privacyModeEnabled = false  // Privacy mode requires ad blocking
                                         Toast.makeText(act, "Ad blocking disabled", Toast.LENGTH_SHORT).show()
                                     }
                                 },
@@ -1070,8 +1048,9 @@ fun HnsGoScreen(act: MainActivity) {
                                 onCheckedChange = { newValue ->
                                     privacyModeEnabled = newValue
                                     AdBlockManager.setPrivacyMode(newValue)
-                                    if (adBlockingEnabled && newValue) {
-                                        // If ad blocking is already enabled, refresh with new mode
+                                    if (adBlockingEnabled) {
+                                        // If ad blocking is enabled, refresh blacklist when privacy mode changes
+                                        // This updates both BASE and PRIVACY lists
                                         adBlockingLoading = true
                                         scope.launch(Dispatchers.IO) {
                                             try {
@@ -1081,7 +1060,6 @@ fun HnsGoScreen(act: MainActivity) {
                                                     Toast.makeText(act, "Privacy mode ${if (newValue) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
                                                 }
                                             } catch (e: Exception) {
-                                                Log.e("HNSGo", "Error refreshing blacklist with privacy mode", e)
                                                 withContext(Dispatchers.Main) {
                                                     adBlockingLoading = false
                                                     Toast.makeText(act, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1092,7 +1070,7 @@ fun HnsGoScreen(act: MainActivity) {
                                         Toast.makeText(act, "Privacy mode ${if (newValue) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                enabled = !adBlockingLoading
+                                enabled = adBlockingEnabled && !adBlockingLoading
                             )
                             Spacer(Modifier.width(16.dp))
                             Text(
@@ -1173,7 +1151,6 @@ fun HnsGoScreen(act: MainActivity) {
                                             val result = DaneVerifier.verify(daneUrl)
                                             daneResult = result
                                         } catch (e: Exception) {
-                                            Log.e("HNSGo", "DANE verification error", e)
                                             daneResult = DaneVerifier.VerificationResult(
                                                 isValid = false,
                                                 message = "DANE status: cannot verify this certificate against TLSA. Browse at your own risk.",
@@ -1212,7 +1189,6 @@ fun HnsGoScreen(act: MainActivity) {
                                     act.startActivity(intent)
                                 } catch (e: Exception) {
                                     Toast.makeText(act, "Error opening URL: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    Log.e("HNSGo", "Error opening URL in Firefox", e)
                                 }
                             },
                             enabled = daneResult?.isValid == true && !daneVerifying,

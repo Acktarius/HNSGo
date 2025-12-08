@@ -1,0 +1,51 @@
+HNS Go - Local Handshake Domain Resolver
+
+🌐 LOCAL HANDshake DOMAIN RESOLUTION
+Resolve Handshake domains directly on your device with local DNS servers. Handshake domains stay local, ICANN domains forwarded to Quad9.
+
+🚀 DECENTRALIZED DNS RESOLUTION
+• Permissionless - No registration or approval needed
+• Local-first - All DNS queries resolved on your device
+• Decentralized - Direct Handshake blockchain sync via SPV
+• Handshake domains local - HNS queries resolved on-device
+
+✨ PRIVATE & SECURE
+• Self-hosted DNS - Your own DoH/DoT servers
+• Encrypted transport - DNS over HTTPS and DNS over TLS
+• Self-signed CA - You control the certificate authority
+• Wi-Fi only sync - Optional restriction to save mobile data
+
+📦 SPV CLIENT
+Lightweight Handshake blockchain sync using Simplified Payment Verification. Syncs headers and verifies Merkle proofs locally.
+
+🛡️ PRIVACY & SECURITY
+• Handshake domains local - HNS queries resolved on-device
+• ICANN domains forwarded - Regular domains use Quad9 (9.9.9.9)
+• User-controlled - Full control over Handshake DNS resolution
+• Background sync - Automatic updates every 12 hours
+
+🔧 EASY SETUP
+1. Sync Handshake blockchain headers
+2. Install the self-generated CA certificate
+3. Configure Firefox to use local DoH server
+4. Browse Handshake domains seamlessly
+
+🎯 FEATURES
+• Local DoH server (port 8443)
+• SPV blockchain sync
+• Automatic background updates
+• Wi-Fi only sync option
+• Firefox integration guide
+• Ad Blocking based on popular blocklists (StevenBlack, OISD, AdGuard) 
+• DANE Inspector for TLSA verification
+
+💡 HOW IT WORKS
+1. App syncs Handshake blockchain using SPV
+2. Local DoH server start automatically
+3. Configure Firefox to use localhost DNS
+4. Handshake domains resolved locally, ICANN domains forwarded to Quad9
+5. Complete privacy for Handshake domain queries
+
+Powered by the Handshake blockchain.
+
+⚠️ IMPORTANT: This app requires Firefox with third-party CA certificates enabled. Follow the in-app setup guide for proper configuration.

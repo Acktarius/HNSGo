@@ -21,3 +21,11 @@ android/captures/
 .cursorrules
 
 log.txt
+
+# Environment files
+.envsecret
+
+# Keystore files (never commit these!)
+*.keystore
+*.jks
+**/local-release-key.keystore

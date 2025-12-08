@@ -5,6 +5,8 @@ import com.acktarius.hnsgo.Config
 import com.acktarius.hnsgo.FullNodePeers
 import com.acktarius.hnsgo.Header
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
@@ -34,14 +36,13 @@ internal object NameQuery {
         headerChain: List<Header>?, // Optional: if provided, adjust root based on peer height
         discoverPeers: suspend () -> List<String>,
         maxPeers: Int = Int.MAX_VALUE
-    ): NameQueryResult = withContext(Dispatchers.IO) {
+    ): NameQueryResult = withContext(Config.NAME_QUERY_DISPATCHER) {
         // Load full node peer errors and proof counts
         FullNodePeers.loadErrors()
         val allFullNodePeers = FullNodePeers.getAllFullNodePeers()
         val filteredPeers = FullNodePeers.filterExcluded(allFullNodePeers)
         
         if (filteredPeers.isEmpty()) {
-            Log.w("HNSGo", "NameQuery: No full node peers available for name query")
             return@withContext NameQueryResult.Error
         }
         
@@ -53,11 +54,9 @@ internal object NameQuery {
         // Limit peers if maxPeers is specified
         val peersToTryLimited = if (maxPeers < Int.MAX_VALUE) {
             peersToTry.take(maxPeers).also {
-                Log.d("HNSGo", "NameQuery: Limited to ${it.size} peers (from ${peersToTry.size} total, maxPeers=$maxPeers)")
             }
         } else {
             peersToTry.also {
-                Log.d("HNSGo", "NameQuery: Using hnsd selection algorithm, trying ${it.size} full node peers for name query")
             }
         }
         
@@ -72,7 +71,6 @@ internal object NameQuery {
             val host = parts[0]
             val port = parts[1].toIntOrNull() ?: Config.P2P_PORT
             
-            Log.d("HNSGo", "NameQuery: Trying peer ${index + 1}/${peersToTryLimited.size}: $host:$port")
             
             val result = ConnectionManager.queryNameFromPeer(
                 host, port, nameHash, nameRoot, chainHeight, headerChain,
@@ -81,21 +79,18 @@ internal object NameQuery {
             
             when (result) {
                 is NameQueryResult.Success -> {
-                    Log.d("HNSGo", "NameQuery: Successfully queried name from $host:$port")
                     // Record proof success (like hnsd's peer->proofs++)
                     FullNodePeers.recordProofSuccess(peer)
                     return@withContext NameQueryResult.Success(result.records, result.proof)
                 }
                 is NameQueryResult.NotFound -> {
                     // For full nodes, "notfound" is an error - they should have the name tree
-                    Log.w("HNSGo", "NameQuery: Full node $host:$port returned notfound - counting as error")
                     FullNodePeers.recordError(peer)
                     // Try next peer
                     continue
                 }
                 is NameQueryResult.Error -> {
                     lastError = "Connection or protocol error"
-                    Log.d("HNSGo", "NameQuery: Error querying $host:$port")
                     // Record error and try next peer
                     FullNodePeers.recordError(peer)
                     continue
@@ -103,10 +98,8 @@ internal object NameQuery {
             }
         }
         
-        Log.w("HNSGo", "NameQuery: Failed to query name from all ${peersToTryLimited.size} full node peers")
         
         if (lastError != null) {
-            Log.w("HNSGo", "NameQuery: Last error was: $lastError")
         }
         return@withContext NameQueryResult.Error
     }

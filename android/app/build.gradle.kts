@@ -5,6 +5,39 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+// Helper function to read .env file
+fun readEnv(key: String, default: String = ""): String {
+    val envFile = file("${project.rootDir}/../.env")
+    if (!envFile.exists()) {
+        return default
+    }
+    return envFile.readLines()
+        .firstOrNull { it.startsWith("$key=") }
+        ?.substringAfter("=")
+        ?.trim()
+        ?: default
+}
+
+// Helper function to read signing secrets (from env vars or .envsecret file)
+fun readEnvSecret(key: String, default: String = ""): String {
+    // First check environment variables (for CI/GitHub Actions)
+    val envValue = System.getenv(key)
+    if (envValue != null && envValue.isNotEmpty()) {
+        return envValue
+    }
+    
+    // Fall back to .envsecret file (for local development)
+    val envSecretFile = file("${project.rootDir}/../.envsecret")
+    if (!envSecretFile.exists()) {
+        return default
+    }
+    return envSecretFile.readLines()
+        .firstOrNull { it.startsWith("$key=") }
+        ?.substringAfter("=")
+        ?.trim()
+        ?: default
+}
+
 android {
     namespace = "com.acktarius.hnsgo"
     compileSdk = 34
@@ -13,8 +46,8 @@ android {
         applicationId = "com.acktarius.hnsgo"
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = readEnv("ANDROID_VERSION_CODE", "1").toInt()
+        versionName = readEnv("APP_VERSION", "1.0")
     }
 
     compileOptions {
@@ -30,6 +63,34 @@ android {
     packaging {
         resources {
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
+    // Signing configuration from .envsecret
+    val keystorePath = readEnvSecret("ANDROID_KEYSTORE_PATH", "")
+    val keystorePassword = readEnvSecret("ANDROID_KEYSTORE_PASSWORD", "")
+    val keyAliasValue = readEnvSecret("ANDROID_KEY_ALIAS", "")
+    val keyPasswordValue = readEnvSecret("ANDROID_KEY_PASSWORD", "")
+
+    if (keystorePath.isNotEmpty() && keystorePassword.isNotEmpty() && keyAliasValue.isNotEmpty()) {
+        // Resolve keystore path (relative to android/app directory)
+        val keystoreFile = file(keystorePath)
+        
+        if (keystoreFile.exists()) {
+            signingConfigs {
+                create("release") {
+                    storeFile = keystoreFile
+                    storePassword = keystorePassword
+                    keyAlias = keyAliasValue
+                    keyPassword = keyPasswordValue
+                }
+            }
+            
+            buildTypes {
+                getByName("release") {
+                    signingConfig = signingConfigs.getByName("release")
+                }
+            }
         }
     }
 }

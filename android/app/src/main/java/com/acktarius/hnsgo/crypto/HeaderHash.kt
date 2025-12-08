@@ -77,7 +77,6 @@ object HeaderHash {
             val prevBlockHex = header.prevBlock.take(16).joinToString("") { "%02x".format(it) }
             val nameRootHex = header.nameRoot.take(16).joinToString("") { "%02x".format(it) }
             val maskHex = header.mask.take(16).joinToString("") { "%02x".format(it) }
-            android.util.Log.e("HNSGo", "HeaderHash:hash: ZERO HASH! prevBlock=$prevBlockHex nameRoot=$nameRootHex mask=$maskHex n=${header.nonce} t=${header.time} v=${header.version} b=${header.bits}")
             // Also check intermediate values
             val leftHex = left.take(16).joinToString("") { "%02x".format(it) }
             val rightHex = right.take(16).joinToString("") { "%02x".format(it) }

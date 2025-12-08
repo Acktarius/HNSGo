@@ -59,7 +59,6 @@ object DaneVerifier {
                 )
             }
             
-            Log.d("HNSGo", "DaneVerifier: Verifying DANE for $host:$port")
             
             // Step 1: Resolve TLSA record
             val tlsaRecord = resolveTLSA(host, port)
@@ -73,7 +72,6 @@ object DaneVerifier {
             }
             
             // Log TLSA record found (details logged in verification)
-            Log.d("HNSGo", "DaneVerifier: Found TLSA record")
             
             // Step 2: Get server certificate
             val serverCert = getServerCertificate(host, port)
@@ -86,7 +84,6 @@ object DaneVerifier {
                 )
             }
             
-            Log.d("HNSGo", "DaneVerifier: Got server certificate: ${serverCert.subjectDN}")
             
             // Step 3: Verify certificate matches TLSA
             val matches = verifyCertificateMatchesTLSA(serverCert, tlsaRecord)
@@ -108,7 +105,6 @@ object DaneVerifier {
             }
             
         } catch (e: Exception) {
-            Log.e("HNSGo", "DaneVerifier: Error during verification", e)
             VerificationResult(
                 isValid = false,
                 message = "DANE status: cannot verify this certificate against TLSA. Browse at your own risk.",
@@ -125,13 +121,11 @@ object DaneVerifier {
     private suspend fun resolveTLSA(host: String, port: Int): TLSARecord? = withContext(Dispatchers.IO) {
         try {
             val tlsaName = "_$port._tcp.$host"
-            Log.d("HNSGo", "DaneVerifier: Resolving TLSA record: $tlsaName")
             
             // Use RecursiveResolver to resolve TLSA record via Handshake
             // TLSA is DNS record type 52 (RFC 6698)
             val dnsMessage = RecursiveResolver.resolve(tlsaName, 52)
             if (dnsMessage == null) {
-                Log.d("HNSGo", "DaneVerifier: No DNS response for TLSA query")
                 return@withContext null
             }
             
@@ -139,18 +133,15 @@ object DaneVerifier {
             val tlsaRecords = answers.filterIsInstance<TLSARecord>()
             
             if (tlsaRecords.isEmpty()) {
-                Log.d("HNSGo", "DaneVerifier: No TLSA records found")
                 return@withContext null
             }
             
             // Return first TLSA record (RFC 6698 allows multiple, but we use first)
             val tlsa = tlsaRecords[0]
             // Log TLSA record found
-            Log.d("HNSGo", "DaneVerifier: Found TLSA record")
             return@withContext tlsa
             
         } catch (e: Exception) {
-            Log.e("HNSGo", "DaneVerifier: Error resolving TLSA record", e)
             null
         }
     }
@@ -164,11 +155,9 @@ object DaneVerifier {
             // Step 1: Resolve hostname to IP address (for Handshake domains, use our resolver)
             val ipAddress = resolveHostToIP(host)
             if (ipAddress == null) {
-                Log.w("HNSGo", "DaneVerifier: Could not resolve hostname to IP: $host")
                 return@withContext null
             }
             
-            Log.d("HNSGo", "DaneVerifier: Resolved $host to $ipAddress")
             
             // Create a trust-all manager for fetching certificate (we verify via DANE)
             val trustAllManager = object : X509TrustManager {
@@ -189,7 +178,6 @@ object DaneVerifier {
             connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, session ->
                 // Verify hostname matches certificate (but we trust all certs for DANE verification)
                 val peerHost = session.peerHost
-                Log.d("HNSGo", "DaneVerifier: SSL session peer host: $peerHost, expected: $host")
                 true // Accept any hostname since we verify via DANE
             }
             connection.connectTimeout = CONNECTION_TIMEOUT_MS
@@ -200,24 +188,19 @@ object DaneVerifier {
             // This is necessary because connect() doesn't always trigger the handshake
             try {
                 val responseCode = connection.responseCode
-                Log.d("HNSGo", "DaneVerifier: HTTPS connection established, response code: $responseCode")
             } catch (e: Exception) {
                 // Even if response fails, we might have the certificate from the handshake
-                Log.d("HNSGo", "DaneVerifier: Response read failed (expected), checking certificate: ${e.message}")
             }
             
             // Get certificate from the SSL session (available after handshake)
             val certificates = connection.serverCertificates
             if (certificates.isNotEmpty() && certificates[0] is X509Certificate) {
                 val cert = certificates[0] as X509Certificate
-                Log.d("HNSGo", "DaneVerifier: Got server certificate: ${cert.subjectDN}")
                 return@withContext cert
             }
             
-            Log.w("HNSGo", "DaneVerifier: No server certificate found in connection")
             null
         } catch (e: Exception) {
-            Log.e("HNSGo", "DaneVerifier: Error getting server certificate: ${e.message}", e)
             null
         }
     }
@@ -234,7 +217,6 @@ object DaneVerifier {
                 val aRecords = answers.filterIsInstance<ARecord>()
                 if (aRecords.isNotEmpty()) {
                     val ip = aRecords[0].address.hostAddress
-                    Log.d("HNSGo", "DaneVerifier: Resolved Handshake domain $host to $ip via Handshake resolver")
                     return@withContext ip
                 }
             }
@@ -246,20 +228,16 @@ object DaneVerifier {
                     // Prefer IPv4
                     val ipv4 = addresses.find { it is java.net.Inet4Address }
                     if (ipv4 != null) {
-                        Log.d("HNSGo", "DaneVerifier: Resolved $host to ${ipv4.hostAddress} via system DNS")
                         return@withContext ipv4.hostAddress
                     }
                     // Fallback to first address
-                    Log.d("HNSGo", "DaneVerifier: Resolved $host to ${addresses[0].hostAddress} via system DNS")
                     return@withContext addresses[0].hostAddress
                 }
             } catch (e: java.net.UnknownHostException) {
-                Log.w("HNSGo", "DaneVerifier: System DNS could not resolve $host: ${e.message}")
             }
             
             null
         } catch (e: Exception) {
-            Log.e("HNSGo", "DaneVerifier: Error resolving hostname $host", e)
             null
         }
     }
@@ -287,20 +265,17 @@ object DaneVerifier {
             val headerLen = nameBytes.size + 10 // name + type(2) + class(2) + ttl(4) + rdlength(2)
             
             if (wireData.size < headerLen + 2) {
-                Log.w("HNSGo", "DaneVerifier: TLSA wire data too short")
                 return false
             }
             
             val rdlength = ((wireData[headerLen - 2].toInt() and 0xFF) shl 8) or (wireData[headerLen - 1].toInt() and 0xFF)
             if (wireData.size < headerLen + rdlength || rdlength < 3) {
-                Log.w("HNSGo", "DaneVerifier: Invalid TLSA rdata length: $rdlength")
                 return false
             }
             
             val rdata = wireData.sliceArray(headerLen until headerLen + rdlength)
             
             if (rdata.size < 3) {
-                Log.w("HNSGo", "DaneVerifier: Invalid TLSA record (too short)")
                 return false
             }
             
@@ -309,11 +284,9 @@ object DaneVerifier {
             val matchType = rdata[2].toInt() and 0xFF
             val tlsaData = rdata.sliceArray(3 until rdata.size)
             
-            Log.d("HNSGo", "DaneVerifier: Verifying cert against TLSA: usage=$usage, selector=$selector, matchType=$matchType")
             
             // Only support Usage 3 (DANE-EE: Domain-issued certificate)
             if (usage != 3) {
-                Log.w("HNSGo", "DaneVerifier: Unsupported TLSA usage: $usage (only usage 3 supported)")
                 return false
             }
             
@@ -328,7 +301,6 @@ object DaneVerifier {
                     cert.publicKey.encoded
                 }
                 else -> {
-                    Log.w("HNSGo", "DaneVerifier: Unsupported TLSA selector: $selector")
                     return false
                 }
             }
@@ -352,14 +324,12 @@ object DaneVerifier {
                     java.util.Arrays.equals(certHash, tlsaData)
                 }
                 else -> {
-                    Log.w("HNSGo", "DaneVerifier: Unsupported TLSA match type: $matchType")
                     false
                 }
             }
             return matches
             
         } catch (e: Exception) {
-            Log.e("HNSGo", "DaneVerifier: Error verifying certificate against TLSA", e)
             return false
         }
     }

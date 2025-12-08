@@ -44,7 +44,6 @@ object Checkpoint {
      * @return New chain height after loading checkpoint
      */
     suspend fun loadCheckpoint(headerChain: MutableList<Header>, currentHeight: Int): Int = withContext(Dispatchers.IO) {
-        Log.d("HNSGo", "Checkpoint: Loading checkpoint at height $CHECKPOINT_HEIGHT")
         
         // Try multiple sources for checkpoint data
         val checkpointData = tryFetchCheckpoint()
@@ -54,14 +53,10 @@ object Checkpoint {
             if (headers.isNotEmpty()) {
                 headerChain.addAll(headers)
                 val newHeight = CHECKPOINT_HEIGHT + headers.size - 1
-                Log.d("HNSGo", "Checkpoint: Loaded ${headers.size} headers, chain height now: $newHeight")
                 return@withContext newHeight
             } else {
-                Log.w("HNSGo", "Checkpoint: Failed to parse checkpoint data")
             }
         } else {
-            Log.w("HNSGo", "Checkpoint: Could not fetch checkpoint data from any source")
-            Log.i("HNSGo", "Checkpoint: P2P sync will be required, or embed checkpoint data manually")
         }
         
         return@withContext currentHeight
@@ -80,7 +75,6 @@ object Checkpoint {
         // Extracted from hnsd's checkpoints.h
         val embeddedCheckpoint = getEmbeddedCheckpoint()
         if (embeddedCheckpoint != null) {
-            Log.d("HNSGo", "Checkpoint: Using embedded checkpoint (${embeddedCheckpoint.size} bytes)")
             return@withContext embeddedCheckpoint
         }
         
@@ -94,7 +88,6 @@ object Checkpoint {
             
             for (urlString in checkpointUrls) {
                 try {
-                    Log.d("HNSGo", "Checkpoint: [DEBUG] Trying to fetch from $urlString")
                     val url = URL(urlString)
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 3000  // Shorter timeout for faster failure
@@ -108,19 +101,15 @@ object Checkpoint {
                         connection.disconnect()
                         
                         if (checkpointData.isNotEmpty()) {
-                            Log.d("HNSGo", "Checkpoint: [DEBUG] Successfully fetched ${checkpointData.size} bytes")
                             return@withContext checkpointData
                         }
                     }
                     connection.disconnect()
                 } catch (e: java.net.SocketTimeoutException) {
-                    Log.d("HNSGo", "Checkpoint: [DEBUG] Timeout connecting to $urlString")
                     // Continue
                 } catch (e: java.net.ConnectException) {
-                    Log.d("HNSGo", "Checkpoint: [DEBUG] Could not connect to $urlString")
                     // Continue
                 } catch (e: Exception) {
-                    Log.d("HNSGo", "Checkpoint: [DEBUG] Error fetching from $urlString: ${e.message}")
                     // Continue
                 }
             }
@@ -129,13 +118,7 @@ object Checkpoint {
         // Method 3: Local file (won't work on Android, kept for reference)
         // This is not applicable for mobile apps
         
-        Log.d("HNSGo", "Checkpoint: No checkpoint data available")
-        Log.w("HNSGo", "Checkpoint: Embedded checkpoint not implemented yet")
-        Log.i("HNSGo", "Checkpoint: To bootstrap the chain autonomously:")
-        Log.i("HNSGo", "  1. Embed checkpoint data from hnsd's checkpoints.h (recommended)")
-        Log.i("HNSGo", "  2. Connect to working Handshake P2P peers via DHT discovery")
         if (Config.DEBUG_MODE) {
-            Log.i("HNSGo", "  3. [DEBUG] Use local checkpoint server (development only)")
         }
         
         return@withContext null
@@ -157,7 +140,6 @@ object Checkpoint {
      */
     private fun getEmbeddedCheckpoint(): ByteArray? {
         val ctx = context ?: run {
-            Log.w("HNSGo", "Checkpoint: Context not initialized - call Checkpoint.init(context) first")
             return null
         }
         
@@ -170,13 +152,8 @@ object Checkpoint {
                     inputStream.close()
                     
                     val expectedSize = 4 + 32 + (150 * 236)  // 35436 bytes
-                    Log.d("HNSGo", "Checkpoint: Loaded ${checkpointData.size} bytes from assets/checkpoint.dat (expected: $expectedSize)")
                     
                     if (checkpointData.size != expectedSize) {
-                        Log.e("HNSGo", "Checkpoint: CRITICAL - Checkpoint file size is wrong!")
-                        Log.e("HNSGo", "Checkpoint: Expected $expectedSize bytes (height + chainwork + 150 headers)")
-                        Log.e("HNSGo", "Checkpoint: Got ${checkpointData.size} bytes")
-                        Log.e("HNSGo", "Checkpoint: File may be corrupted or in wrong format")
                         return null
                     }
                     
@@ -188,24 +165,14 @@ object Checkpoint {
                                     (heightBytes[2].toInt() and 0xFF shl 8) or
                                     (heightBytes[3].toInt() and 0xFF)
                         if (height != CHECKPOINT_HEIGHT) {
-                            Log.e("HNSGo", "Checkpoint: CRITICAL - Checkpoint height is wrong!")
-                            Log.e("HNSGo", "Checkpoint: Expected height ${CHECKPOINT_HEIGHT}, got $height")
-                            Log.e("HNSGo", "Checkpoint: File may be from wrong network or corrupted")
                             return null
                         }
-                        Log.d("HNSGo", "Checkpoint: Verified checkpoint height: $height (mainnet)")
                     }
                     
                     checkpointData
         } catch (e: java.io.FileNotFoundException) {
-            Log.w("HNSGo", "Checkpoint: checkpoint.dat not found in assets")
-            Log.i("HNSGo", "Checkpoint: To add checkpoint:")
-            Log.i("HNSGo", "  1. Download: https://raw.githubusercontent.com/handshake-org/hnsd/master/src/checkpoints.h")
-            Log.i("HNSGo", "  2. Extract HSK_CHECKPOINT_MAIN array and convert to binary")
-            Log.i("HNSGo", "  3. Save as android/app/src/main/assets/checkpoint.dat")
             null
         } catch (e: Exception) {
-            Log.e("HNSGo", "Checkpoint: Error loading checkpoint from assets: ${e.message}", e)
             null
         }
     }
@@ -234,11 +201,8 @@ object Checkpoint {
                         (heightBytes[3].toInt() and 0xFF)
             offset += 4
             
-            Log.d("HNSGo", "Checkpoint: Parsing checkpoint at height $height (expected: ${CHECKPOINT_HEIGHT})")
             
             if (height != CHECKPOINT_HEIGHT) {
-                Log.e("HNSGo", "Checkpoint: CRITICAL - Height mismatch! Got $height, expected ${CHECKPOINT_HEIGHT}")
-                Log.e("HNSGo", "Checkpoint: This checkpoint is for the wrong height - checkpoint data may be corrupted or from wrong network!")
                 return headers  // Don't parse wrong checkpoint
             }
             
@@ -246,8 +210,6 @@ object Checkpoint {
             // Format: height(4) + chainwork(32) + headers(150*236) = 35436 bytes
             val expectedCheckpointSize = 4 + 32 + (150 * 236)  // 35436 bytes
             if (data.size != expectedCheckpointSize) {
-                Log.e("HNSGo", "Checkpoint: CRITICAL - Size mismatch! Got ${data.size} bytes, expected $expectedCheckpointSize bytes")
-                Log.e("HNSGo", "Checkpoint: Checkpoint data may be corrupted or in wrong format!")
                 return headers  // Don't parse wrong format
             }
             
@@ -264,14 +226,8 @@ object Checkpoint {
                 // Expected nonce from checkpoints.h line 19: "\x47\xb3\x3c\xe5" = 0xe53cb347 (little-endian)
                 val expectedNonce = 0xe53cb347.toInt()  // From checkpoints.h
                 if (firstNonce != expectedNonce) {
-                    Log.e("HNSGo", "Checkpoint: CRITICAL - First header nonce mismatch!")
-                    Log.e("HNSGo", "Checkpoint: Got 0x${firstNonce.toString(16)}, expected 0x${expectedNonce.toString(16)}")
-                    Log.e("HNSGo", "Checkpoint: First 4 bytes: ${firstNonceBytes.joinToString("") { "%02x".format(it) }}")
-                    Log.e("HNSGo", "Checkpoint: Checkpoint data does NOT match hnsd's checkpoints.h!")
-                    Log.e("HNSGo", "Checkpoint: Data may be from different network, corrupted, or outdated")
                     return headers  // Don't parse wrong checkpoint
                 } else {
-                    Log.d("HNSGo", "Checkpoint: First header nonce matches hnsd's checkpoints.h (0x${firstNonce.toString(16)})")
                 }
             }
             
@@ -284,14 +240,12 @@ object Checkpoint {
             val expectedSize = 4 + 32 + (expectedHeaders * headerSize) // height + chainwork + headers
             
             if (data.size < expectedSize) {
-                Log.w("HNSGo", "Checkpoint: Data too small! Got ${data.size} bytes, expected at least $expectedSize bytes")
                 return headers
             }
             
             var prevHeader: Header? = null
             for (i in 0 until expectedHeaders) {
                 if (offset + headerSize > data.size) {
-                    Log.w("HNSGo", "Checkpoint: Not enough data for header $i (offset=$offset, size=${data.size})")
                     break
                 }
                 val headerBytes = data.sliceArray(offset until offset + headerSize)
@@ -307,7 +261,6 @@ object Checkpoint {
                         val nameRootHex = header.nameRoot.take(16).joinToString("") { "%02x".format(it) }
                         val maskHex = header.mask.take(16).joinToString("") { "%02x".format(it) }
                         val headerHeight = CHECKPOINT_HEIGHT + i
-                        Log.e("HNSGo", "Checkpoint:parseCheckpoint: Header $i (h=$headerHeight) hash=$hashHex zero=$hashIsZero prevBlock=$prevBlockHex nameRoot=$nameRootHex mask=$maskHex n=${header.nonce} t=${header.time} v=${header.version} b=${header.bits}")
                         
                         // CRITICAL: Log the last header (block 136149) hash for verification
                         if (i == expectedHeaders - 1) {
@@ -315,17 +268,9 @@ object Checkpoint {
                             // Expected nonce from checkpoints.h: "\x30\x00\xf7\x2e" = 0x2ef70030 (little-endian)
                             val expectedLastNonce = 0x2ef70030.toInt()
                             if (header.nonce != expectedLastNonce) {
-                                Log.e("HNSGo", "Checkpoint:parseCheckpoint: CRITICAL - Last header (136149) nonce mismatch!")
-                                Log.e("HNSGo", "Checkpoint:parseCheckpoint: Got 0x${header.nonce.toString(16)}, expected 0x${expectedLastNonce.toString(16)}")
-                                Log.e("HNSGo", "Checkpoint:parseCheckpoint: Checkpoint data does NOT match hnsd's checkpoints.h!")
                             } else {
-                                Log.d("HNSGo", "Checkpoint:parseCheckpoint: Last header (136149) nonce matches checkpoints.h (0x${header.nonce.toString(16)})")
                             }
                             
-                            Log.e("HNSGo", "Checkpoint:parseCheckpoint: BLOCK 136149 HASH: $hashHex")
-                            Log.e("HNSGo", "Checkpoint:parseCheckpoint: This hash MUST match what peers expect for block 136149")
-                            Log.e("HNSGo", "Checkpoint:parseCheckpoint: If peers return 'notfound', this hash is wrong or checkpoint data is wrong")
-                            Log.e("HNSGo", "Checkpoint:parseCheckpoint: Verify checkpoint.dat was generated from hnsd's checkpoints.h HSK_CHECKPOINT_MAIN")
                         }
                     }
                     
@@ -335,13 +280,8 @@ object Checkpoint {
                         if (!header.prevBlock.contentEquals(prevHash)) {
                             val prevHashHex = prevHash.joinToString("") { "%02x".format(it) }
                             val prevBlockHex = header.prevBlock.joinToString("") { "%02x".format(it) }
-                            Log.e("HNSGo", "Checkpoint: Invalid checkpoint chain at header $i!")
-                            Log.e("HNSGo", "Checkpoint: Header $i prevBlock: $prevBlockHex")
-                            Log.e("HNSGo", "Checkpoint: Previous header hash: $prevHashHex")
-                            Log.e("HNSGo", "Checkpoint: Headers should connect but don't match!")
                             // Continue parsing but log the error
                         } else {
-                            Log.d("HNSGo", "Checkpoint: Header $i connects to previous (prevBlock matches hash)")
                         }
                     }
                     
@@ -349,17 +289,13 @@ object Checkpoint {
                     prevHeader = header
                     offset += headerSize
                 } catch (e: Exception) {
-                    Log.e("HNSGo", "Checkpoint: Error parsing header $i at offset $offset", e)
                     break
                 }
             }
             
-            Log.d("HNSGo", "Checkpoint: Parsed ${headers.size} headers from checkpoint (expected: $expectedHeaders)")
             if (headers.size != expectedHeaders) {
-                Log.w("HNSGo", "Checkpoint: Header count mismatch! Got ${headers.size}, expected $expectedHeaders")
             }
         } catch (e: Exception) {
-            Log.e("HNSGo", "Checkpoint: Error parsing checkpoint data", e)
         }
         
         return headers

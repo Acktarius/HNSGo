@@ -47,7 +47,6 @@ object HardcodedPeers {
         val peersFile = File(dir, Config.PEERS_FILE)
         
         if (!peersFile.exists()) {
-            Log.d("HardcodedPeers", "No persisted peers file found - will populate on first discovery")
             verifiedPeers.clear()
             return@withContext emptyList()
         }
@@ -71,11 +70,9 @@ object HardcodedPeers {
                 verifiedPeers.clear()
                 verifiedPeers.addAll(peers.take(MAX_PEERS))
                 
-                Log.d("HardcodedPeers", "Loaded ${verifiedPeers.size} verified peers from storage")
                 return@withContext verifiedPeers.toList()
             }
         } catch (e: Exception) {
-            Log.e("HardcodedPeers", "Error loading peers from storage", e)
         }
         
         verifiedPeers.clear()
@@ -107,9 +104,7 @@ object HardcodedPeers {
             tempFile.writeBytes(data)
             tempFile.renameTo(peersFile)
             
-            Log.d("HardcodedPeers", "Saved ${verifiedPeers.size} verified peers to storage")
         } catch (e: Exception) {
-            Log.e("HardcodedPeers", "Error saving peers", e)
         }
     }
     
@@ -153,16 +148,12 @@ object HardcodedPeers {
             socket.connect(InetSocketAddress(host, port), 3000) // 3 second timeout
             socket.close()
             
-            Log.d("HardcodedPeers", "Peer verified (connectivity): $peer")
             return@withContext true
         } catch (e: java.net.SocketTimeoutException) {
-            Log.d("HardcodedPeers", "Peer verification timeout: $peer")
             return@withContext false
         } catch (e: java.net.ConnectException) {
-            Log.d("HardcodedPeers", "Peer verification refused: $peer")
             return@withContext false
         } catch (e: Exception) {
-            Log.d("HardcodedPeers", "Peer verification failed: $peer - ${e.message}")
             return@withContext false
         }
     }
@@ -175,7 +166,6 @@ object HardcodedPeers {
             return@withContext
         }
         
-        Log.d("HardcodedPeers", "Verifying ${verifiedPeers.size} peers...")
         val validPeers = mutableListOf<String>()
         
         // Verify peers in parallel (but limit concurrency)
@@ -194,7 +184,6 @@ object HardcodedPeers {
         
         val removedCount = verifiedPeers.size - validPeers.size
         if (removedCount > 0) {
-            Log.d("HardcodedPeers", "Removed $removedCount failed peers")
         }
         
         verifiedPeers.clear()
@@ -215,7 +204,6 @@ object HardcodedPeers {
         if (verifiedPeers.isEmpty()) {
             val peersToAdd = validPeers.take(MAX_PEERS)
             verifiedPeers.addAll(peersToAdd)
-            Log.d("HardcodedPeers", "Populated empty list with ${peersToAdd.size} peers")
             savePeers()
             return@withContext
         }

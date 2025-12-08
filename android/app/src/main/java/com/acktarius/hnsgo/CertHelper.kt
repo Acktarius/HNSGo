@@ -208,13 +208,36 @@ object CertHelper {
         
         val ks = KeyStore.getInstance("PKCS12")
         ks.load(null, null)
+        
+        // Create certificate chain: server cert first, then CA cert
+        val certChain = arrayOf(serverCert, caCert)
+        
         // Store server cert with CA in chain
         ks.setKeyEntry(
             SERVER_ALIAS,
             serverKey,
             password,
-            arrayOf(serverCert, caCert)
+            certChain
         )
+        
+        // Verify the chain was stored correctly
+        val storedChain = ks.getCertificateChain(SERVER_ALIAS)
+        if (storedChain == null || storedChain.size != certChain.size) {
+            // Try using BKS keystore instead of PKCS12 (Android's BKS might preserve chains better)
+            try {
+                val bks = KeyStore.getInstance("BKS")
+                bks.load(null, null)
+                bks.setKeyEntry(SERVER_ALIAS, serverKey, password, certChain)
+                val bksChain = bks.getCertificateChain(SERVER_ALIAS)
+                if (bksChain != null && bksChain.size == certChain.size) {
+                    return bks
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("HNSGo", "CertHelper: BKS keystore not available, using PKCS12", e)
+            }
+        } else {
+        }
+        
         return ks
     }
     
@@ -254,7 +277,6 @@ object CertHelper {
                 throw IllegalStateException("Failed to encode certificate")
             }
             
-            android.util.Log.d("HNSGo", "Installing CA certificate: ${derBytes.size} bytes")
             
             // Create installation intent
             val intent = KeyChain.createInstallIntent()
@@ -266,7 +288,6 @@ object CertHelper {
             // Verify intent can be resolved
             if (intent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(intent)
-                android.util.Log.d("HNSGo", "Certificate installation intent started")
             } else {
                 android.util.Log.e("HNSGo", "No activity found to handle certificate installation")
                 throw IllegalStateException("Certificate installer not available")
@@ -297,7 +318,6 @@ object CertHelper {
             val markedAsInstalled = prefs.getBoolean(KEY_CERT_INSTALLED, false)
             
             if (markedAsInstalled) {
-                android.util.Log.d("HNSGo", "Certificate marked as installed in preferences")
                 return true
             }
             
@@ -306,7 +326,6 @@ object CertHelper {
             // Check if we can find certificates matching our pattern
             false
         } catch (e: Exception) {
-            android.util.Log.d("HNSGo", "Error checking certificate installation: ${e.message}")
             false
         }
     }
@@ -318,7 +337,6 @@ object CertHelper {
         try {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_CERT_INSTALLED, true).apply()
-            android.util.Log.d("HNSGo", "Certificate marked as installed")
         } catch (e: Exception) {
             android.util.Log.e("HNSGo", "Error marking certificate as installed", e)
         }
@@ -331,7 +349,6 @@ object CertHelper {
         try {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_CERT_INSTALLED, false).apply()
-            android.util.Log.d("HNSGo", "Certificate installation status cleared")
         } catch (e: Exception) {
             android.util.Log.e("HNSGo", "Error clearing certificate status", e)
         }
@@ -396,7 +413,6 @@ object CertHelper {
                     context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                         outputStream.write(derBytes)
                     }
-                    android.util.Log.d("HNSGo", "Certificate saved to Downloads via MediaStore")
                     return true
                 } else {
                     android.util.Log.e("HNSGo", "Failed to create file in Downloads")
@@ -413,7 +429,6 @@ object CertHelper {
                 FileOutputStream(certFile).use { fos ->
                     fos.write(derBytes)
                 }
-                android.util.Log.d("HNSGo", "Certificate saved to Downloads: ${certFile.absolutePath}")
                 return true
             }
         } catch (e: Exception) {
@@ -446,11 +461,9 @@ object CertHelper {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (intent.resolveActivity(context.packageManager) != null) {
                     context.startActivity(intent)
-                    android.util.Log.d("HNSGo", "Opened certificate settings with intent: ${intent.action}")
                     return
                 }
             } catch (e: Exception) {
-                android.util.Log.d("HNSGo", "Failed to open with intent: ${intent.action}", e)
                 continue
             }
         }

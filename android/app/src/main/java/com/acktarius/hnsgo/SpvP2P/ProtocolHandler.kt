@@ -45,7 +45,6 @@ internal object ProtocolHandler {
         while (attempts < maxAttempts && (!versionReceived || !verackReceived)) {
             val elapsed = System.currentTimeMillis() - startTime
             if (elapsed > handshakeTimeout) {
-                Log.w("HNSGo", "ProtocolHandler: Handshake timeout after ${elapsed}ms")
                 return Triple(false, null, null)
             }
             
@@ -53,7 +52,6 @@ internal object ProtocolHandler {
                 val message = messageHandler.receiveMessage(input)
                 if (message == null) {
                     if (attempts == 0) {
-                        Log.w("HNSGo", "ProtocolHandler: Peer closed connection immediately")
                     }
                     return Triple(false, null, null)
                 }
@@ -70,7 +68,6 @@ internal object ProtocolHandler {
                                 ourVerackSent = true
                             }
                         } catch (e: Exception) {
-                            Log.e("HNSGo", "ProtocolHandler: Error parsing version", e)
                             versionReceived = true
                             if (!ourVerackSent) {
                                 messageHandler.sendMessage(output, "verack", byteArrayOf())
@@ -94,7 +91,6 @@ internal object ProtocolHandler {
                                 messageHandler.sendMessage(output, "pong", pongPayload)
                             }
                         } catch (e: Exception) {
-                            Log.w("HNSGo", "ProtocolHandler: Error handling ping during handshake", e)
                         }
                         // Continue handshake - don't break
                     }
@@ -103,17 +99,13 @@ internal object ProtocolHandler {
                     }
                 }
             } catch (e: SocketTimeoutException) {
-                Log.w("HNSGo", "ProtocolHandler: Socket timeout (attempt ${attempts + 1})")
             } catch (e: SocketException) {
                 if (e.message?.contains("Connection reset") == true || e.message?.contains("reset") == true) {
-                    Log.w("HNSGo", "ProtocolHandler: Connection reset by peer")
                     return Triple(false, null, null)
                 } else {
-                    Log.e("HNSGo", "ProtocolHandler: Socket error", e)
                     return Triple(false, null, null)
                 }
             } catch (e: Exception) {
-                Log.e("HNSGo", "ProtocolHandler: Error during handshake", e)
                 return Triple(false, null, null)
             }
             attempts++
@@ -121,7 +113,6 @@ internal object ProtocolHandler {
         
         val success = versionReceived && verackReceived
         if (!success) {
-            Log.w("HNSGo", "ProtocolHandler: Handshake incomplete")
         }
         return Triple(success, peerHeight, peerServices)
     }
@@ -243,12 +234,6 @@ internal object ProtocolHandler {
         val nameRootHex = nameRoot.joinToString("") { "%02x".format(it) }
         val nameHashHex = nameHash.joinToString("") { "%02x".format(it) }
         val payloadHex = payload.joinToString("") { "%02x".format(it) }
-        Log.w("HNSGo", "ProtocolHandler: ========== GETPROOF WIRE FORMAT ==========")
-        Log.w("HNSGo", "ProtocolHandler: Payload size: ${payload.size} bytes (expected: 64)")
-        Log.w("HNSGo", "ProtocolHandler: Payload bytes (hex): $payloadHex")
-        Log.w("HNSGo", "ProtocolHandler: First 32 bytes (root): $nameRootHex")
-        Log.w("HNSGo", "ProtocolHandler: Last 32 bytes (key/nameHash): $nameHashHex")
-        Log.w("HNSGo", "ProtocolHandler: ===========================================")
         
         messageHandler.sendMessage(output, "getproof", payload)
     }
@@ -276,7 +261,6 @@ internal object ProtocolHandler {
         while (headersReceived < 2000) { // Limit to prevent infinite loop
             val message = messageHandler.receiveMessage(input)
             if (message == null) {
-                Log.w("HNSGo", "ProtocolHandler: Failed to receive message, stopping")
                 break
             }
             
@@ -291,7 +275,6 @@ internal object ProtocolHandler {
                     messageHandler.sendMessage(output, "pong", pongPayload)
                     continue // Continue waiting for headers
                 } catch (e: Exception) {
-                    Log.w("HNSGo", "ProtocolHandler: Error handling ping message", e)
                     continue
                 }
             }
@@ -374,7 +357,6 @@ internal object ProtocolHandler {
                 // Peer doesn't have the requested headers - stop waiting and try next peer
                 val payloadHex = message.payload.joinToString("") { "%02x".format(it) }
                 val payloadSize = message.payload.size
-                Log.w("HNSGo", "ProtocolHandler: Peer responded with 'notfound' - doesn't have requested headers, stopping - payload size: $payloadSize, payload: $payloadHex")
                 break
             }
         }

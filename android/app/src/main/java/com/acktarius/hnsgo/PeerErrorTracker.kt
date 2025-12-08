@@ -54,10 +54,8 @@ object PeerErrorTracker {
                         peerErrors[peer] = count
                     }
                 }
-                Log.d("PeerErrorTracker", "Loaded error counts for ${peerErrors.size} peers")
             }
         } catch (e: Exception) {
-            Log.e("PeerErrorTracker", "Error loading peer errors", e)
             peerErrors.clear()
         }
     }
@@ -86,9 +84,7 @@ object PeerErrorTracker {
             tempFile.writeBytes(data)
             tempFile.renameTo(errorsFile)
             
-            Log.d("PeerErrorTracker", "Saved error counts for ${peerErrors.size} peers")
         } catch (e: Exception) {
-            Log.e("PeerErrorTracker", "Error saving peer errors", e)
         }
     }
     
@@ -100,10 +96,8 @@ object PeerErrorTracker {
         val newCount = currentCount + 1
         peerErrors[peer] = newCount
         
-        Log.d("PeerErrorTracker", "Recorded error for $peer (count: $newCount/$MAX_ERRORS)")
         
         if (newCount >= MAX_ERRORS) {
-            Log.w("PeerErrorTracker", "Peer $peer has exceeded max errors ($MAX_ERRORS), will be excluded")
         }
         
         saveErrors()
@@ -114,7 +108,6 @@ object PeerErrorTracker {
      */
     suspend fun resetErrors(peer: String) = withContext(Dispatchers.IO) {
         if (peerErrors.remove(peer) != null) {
-            Log.d("PeerErrorTracker", "Reset error count for $peer (connection successful)")
             saveErrors()
         }
     }
@@ -153,7 +146,6 @@ object PeerErrorTracker {
                 errorsFile.delete()
             }
         }
-        Log.d("PeerErrorTracker", "Cleared all peer error tracking")
     }
 }
 
