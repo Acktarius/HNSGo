@@ -1,6 +1,9 @@
 package com.acktarius.hnsgo
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -37,17 +40,24 @@ object DnsSeedDiscovery {
     suspend fun discoverPeersFromDnsSeeds(): List<String> = withContext(Dispatchers.IO) {
         val discoveredPeers = mutableSetOf<String>()
         
-        
-        for (seed in DNS_SEEDS) {
-            try {
-                val peers = queryDnsSeed(seed)
-                
-                if (peers.isNotEmpty()) {
-                    discoveredPeers.addAll(peers)
-                } else {
+        // Query all DNS seeds in parallel for faster discovery
+        // Each seed query runs concurrently on Dispatchers.IO
+        val seedResults = coroutineScope {
+            DNS_SEEDS.map { seed ->
+                async {
+                    try {
+                        queryDnsSeed(seed)
+                    } catch (e: Exception) {
+                        emptyList<String>()
+                    }
                 }
-            } catch (e: Exception) {
-                // Continue to next seed
+            }.awaitAll()
+        }
+        
+        // Collect all discovered peers
+        for (peers in seedResults) {
+            if (peers.isNotEmpty()) {
+                discoveredPeers.addAll(peers)
             }
         }
         

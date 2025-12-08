@@ -4,6 +4,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
+    <!-- Declare package queries for Firefox detection (Android 11+ / API 30+) -->
+    <queries>
+        <!-- Query for specific Firefox packages -->
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.firefox_beta" />
+        <package android:name="org.mozilla.fenix" />
+        <package android:name="org.mozilla.focus" />
+        <package android:name="org.mozilla.fennec_fdroid" />
+        <!-- Query for apps that can handle HTTP/HTTPS URLs (for intent resolution) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:label="HNS Go"

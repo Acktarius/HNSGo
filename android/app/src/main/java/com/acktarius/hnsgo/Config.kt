@@ -24,7 +24,7 @@ object Config {
     // Thread pool sizes (configurable per environment)
     // Adjust these based on profiling and load characteristics
     const val HEADER_SYNC_THREADS = 1  // Single thread for strict ordering (sequential header sync)
-    const val NAME_QUERY_THREADS = 3  // Small pool for concurrent name queries (2-4 threads recommended)
+    const val NAME_QUERY_THREADS = 5  // Pool for concurrent name queries (increased for faster resolution on big websites)
     const val PEER_DISCOVERY_THREADS = 2  // Small pool for peer discovery operations (2-4 threads recommended)
     
     // Thread counters for naming

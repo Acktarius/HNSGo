@@ -7,6 +7,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -189,15 +190,26 @@ class PeerDiscovery {
         val discoveredPeers = mutableListOf<PeerNode>()
         discoveredPeers.addAll(bootstrapPeers)
         
-        // Query bootstrap nodes for their neighbors (with timeout handling)
+        // Query bootstrap nodes for their neighbors in parallel (with timeout handling)
+        // Each bootstrap node query runs on a different thread from PEER_DISCOVERY_DISPATCHER pool
         var dhtSuccessCount = 0
-        for (bootstrap in bootstrapPeers) {
-            try {
-                val neighbors = withTimeoutOrNull(DHT_QUERY_TIMEOUT_MS * 2) {
-                    findNode(bootstrap, nodeId!!)
-                }
-                
-                if (neighbors != null && neighbors.isNotEmpty()) {
+        if (bootstrapPeers.isNotEmpty()) {
+            val bootstrapResults = coroutineScope {
+                bootstrapPeers.map { bootstrap ->
+                    async(Config.PEER_DISCOVERY_DISPATCHER) {
+                        try {
+                            withTimeoutOrNull(DHT_QUERY_TIMEOUT_MS * 2) {
+                                findNode(bootstrap, nodeId!!)
+                            } ?: emptyList()
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                    }
+                }.awaitAll()
+            }
+            
+            for (neighbors in bootstrapResults) {
+                if (neighbors.isNotEmpty()) {
                     dhtSuccessCount++
                     for (neighbor in neighbors) {
                         if (!discoveredPeers.contains(neighbor)) {
@@ -205,9 +217,7 @@ class PeerDiscovery {
                             discoveredPeers.add(neighbor)
                         }
                     }
-                } else {
                 }
-            } catch (e: Exception) {
             }
         }
         
@@ -255,17 +265,20 @@ class PeerDiscovery {
             
             if (toQuery.isEmpty()) break
             
-            // Query each node in parallel
-            val results = toQuery.map { node ->
-                async {
-                    try {
-                        queriedNodes.add(node.address.toString())
-                        findNode(node, targetId)
-                    } catch (e: Exception) {
-                        emptyList()
+            // Query each node in parallel - explicitly dispatch to PEER_DISCOVERY_DISPATCHER
+            // so each query runs on a different thread from the pool, enabling true parallel execution
+            val results = coroutineScope {
+                toQuery.map { node ->
+                    async(Config.PEER_DISCOVERY_DISPATCHER) {
+                        try {
+                            queriedNodes.add(node.address.toString())
+                            findNode(node, targetId)
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
                     }
-                }
-            }.awaitAll()
+                }.awaitAll()
+            }
             
             // Add discovered nodes to candidates
             for (result in results) {

@@ -65,6 +65,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import android.util.Log
 import android.widget.Toast
+import com.acktarius.hnsgo.util.FirefoxUtils
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -165,6 +166,7 @@ fun HnsGoScreen(act: MainActivity) {
     var daneUrl by remember { mutableStateOf("") }
     var daneVerifying by remember { mutableStateOf(false) }
     var daneResult by remember { mutableStateOf<DaneVerifier.VerificationResult?>(null) }
+    var firefoxAvailable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val typewriterFont = FontFamily.Monospace
     
@@ -176,6 +178,12 @@ fun HnsGoScreen(act: MainActivity) {
         // Load saved enabled state
         adBlockingEnabled = AdBlockManager.isEnabled()
         privacyModeEnabled = AdBlockManager.isPrivacyModeEnabled()
+        
+        // Check if Firefox is installed
+        firefoxAvailable = FirefoxUtils.isFirefoxInstalled(act)
+        Log.d("MainActivity", "Firefox detection: firefoxAvailable = $firefoxAvailable")
+        val firefoxPackage = FirefoxUtils.getFirefoxPackageName(act)
+        Log.d("MainActivity", "Firefox package: $firefoxPackage")
     }
     
     // Listen for debug query results from DohService
@@ -1089,7 +1097,7 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(16.dp))
                     
                     Text(
-                        "DANE Security Inspector",
+                        "DANE Inspector",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = typewriterFont,
                             fontSize = 14.sp,
@@ -1182,25 +1190,33 @@ fun HnsGoScreen(act: MainActivity) {
                             )
                         }
                         
-                        Button(
-                            onClick = {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(daneUrl))
-                                    act.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(act, "Error opening URL: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            enabled = daneResult?.isValid == true && !daneVerifying,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                "Open in Firefox",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
+                        // Only show Firefox button if Firefox is installed
+                        if (firefoxAvailable) {
+                            Button(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(daneUrl))
+                                        // Set Firefox package to open specifically in Firefox
+                                        val firefoxPackage = FirefoxUtils.getFirefoxPackageName(act)
+                                        if (firefoxPackage != null) {
+                                            intent.setPackage(firefoxPackage)
+                                        }
+                                        act.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(act, "Error opening URL in Firefox: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                enabled = daneResult?.isValid == true && !daneVerifying,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    "Open in Firefox",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = typewriterFont,
+                                        fontSize = 11.sp
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                     

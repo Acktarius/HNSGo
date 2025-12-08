@@ -9,11 +9,15 @@ import org.xbill.DNS.ARecord
 import org.xbill.DNS.Section
 import org.xbill.DNS.TLSARecord
 import org.xbill.DNS.Type
+import org.xbill.DNS.DClass
+import org.xbill.DNS.Message
 import java.net.URL
 import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SNIServerName
+import javax.net.ssl.SNIHostName
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
@@ -29,14 +33,42 @@ object DaneVerifier {
     private const val READ_TIMEOUT_MS = 10000
     
     /**
-     * DANE verification result
+     * DANE inspection result with detailed information
      */
     data class VerificationResult(
         val isValid: Boolean,
         val message: String,
         val tlsaFound: Boolean = false,
-        val certificateFound: Boolean = false
-    )
+        val certificateFound: Boolean = false,
+        // Enhanced inspection details
+        val status: DANEStatus = DANEStatus.ERROR,
+        val matchedRecord: MatchedTLSA? = null,
+        val certInfo: CertificateInfo? = null,
+        val securityNotes: List<String> = emptyList()
+    ) {
+        enum class DANEStatus {
+            DANE_OK,           // Valid DANE match
+            DANE_MISMATCH,     // TLSA present but doesn't match
+            NO_TLSA,           // No TLSA record found
+            ERROR              // Error during inspection
+        }
+        
+        data class MatchedTLSA(
+            val usage: Int,           // 2 (DANE-TA) or 3 (DANE-EE)
+            val selector: Int,         // 0 (full cert) or 1 (SPKI)
+            val matchingType: Int,     // 0 (exact), 1 (SHA-256), 2 (SHA-512)
+            val index: Int            // Index in TLSA record list
+        )
+        
+        data class CertificateInfo(
+            val subject: String,
+            val issuer: String,
+            val spkiFingerprint: String,  // SHA-256 of SubjectPublicKeyInfo
+            val validFrom: String,
+            val validTo: String,
+            val isSelfSigned: Boolean
+        )
+    }
     
     /**
      * Verify DANE for a given URL
@@ -60,47 +92,66 @@ object DaneVerifier {
             }
             
             
-            // Step 1: Resolve TLSA record
-            val tlsaRecord = resolveTLSA(host, port)
-            if (tlsaRecord == null) {
+            // Step 1: Resolve all TLSA records
+            val tlsaRecords = resolveAllTLSA(host, port)
+            if (tlsaRecords.isEmpty()) {
                 return@withContext VerificationResult(
                     isValid = false,
-                    message = "DANE status: cannot verify this certificate against TLSA. Browse at your own risk.",
+                    message = "DANE status: No TLSA record found. Cannot verify certificate.",
                     tlsaFound = false,
-                    certificateFound = false
+                    certificateFound = false,
+                    status = VerificationResult.DANEStatus.NO_TLSA
                 )
             }
             
-            // Log TLSA record found (details logged in verification)
-            
-            // Step 2: Get server certificate
-            val serverCert = getServerCertificate(host, port)
-            if (serverCert == null) {
+            // Step 2: Get full certificate chain
+            val certChain = getServerCertificateChain(host, port)
+            if (certChain.isEmpty()) {
                 return@withContext VerificationResult(
                     isValid = false,
-                    message = "DANE status: cannot verify this certificate against TLSA. Browse at your own risk.",
+                    message = "DANE status: Cannot fetch server certificate chain.",
                     tlsaFound = true,
-                    certificateFound = false
+                    certificateFound = false,
+                    status = VerificationResult.DANEStatus.ERROR
                 )
             }
             
+            val endEntityCert = certChain[0]
+            val certInfo = extractCertificateInfo(endEntityCert)
             
-            // Step 3: Verify certificate matches TLSA
-            val matches = verifyCertificateMatchesTLSA(serverCert, tlsaRecord)
+            // Step 3: Verify certificate chain against all TLSA records
+            val matchResult = verifyCertificateChainMatchesTLSA(certChain, tlsaRecords)
             
-            if (matches) {
+            val securityNotes = mutableListOf<String>()
+            if (certInfo.isSelfSigned) {
+                securityNotes.add("Certificate is self-signed (DANE-EE with self-signed cert, DNSSEC-validated)")
+            }
+            if (matchResult.matchedRecord != null) {
+                securityNotes.add("TLSA record ${matchResult.matchedRecord.index + 1} matched (Usage ${matchResult.matchedRecord.usage}, Selector ${matchResult.matchedRecord.selector}, MatchType ${matchResult.matchedRecord.matchingType})")
+            } else {
+                securityNotes.add("TLSA present but does not match current certificate chain")
+            }
+            
+            if (matchResult.isValid) {
                 VerificationResult(
                     isValid = true,
                     message = "DANE status: ✓ Certificate matches TLSA record. Safe to open in Firefox.\n\nNote: Firefox will show a certificate warning (this is normal for Handshake sites). Click 'Advanced' → 'Accept the Risk' - Firefox will remember your choice.",
                     tlsaFound = true,
-                    certificateFound = true
+                    certificateFound = true,
+                    status = VerificationResult.DANEStatus.DANE_OK,
+                    matchedRecord = matchResult.matchedRecord,
+                    certInfo = certInfo,
+                    securityNotes = securityNotes
                 )
             } else {
                 VerificationResult(
                     isValid = false,
                     message = "DANE status: ✗ Certificate does NOT match TLSA record. Do not proceed.",
                     tlsaFound = true,
-                    certificateFound = true
+                    certificateFound = true,
+                    status = VerificationResult.DANEStatus.DANE_MISMATCH,
+                    certInfo = certInfo,
+                    securityNotes = securityNotes
                 )
             }
             
@@ -115,49 +166,79 @@ object DaneVerifier {
     }
     
     /**
-     * Resolve TLSA record for a domain and port
+     * Resolve all TLSA records for a domain and port
      * Format: _port._tcp.domain (e.g., _443._tcp.nathan.woodbur)
+     * Checks cache first before querying blockchain
      */
-    private suspend fun resolveTLSA(host: String, port: Int): TLSARecord? = withContext(Dispatchers.IO) {
+    private suspend fun resolveAllTLSA(host: String, port: Int): List<TLSARecord> = withContext(Dispatchers.IO) {
         try {
             val tlsaName = "_$port._tcp.$host"
+            val tlsaType = Type.TLSA  // 52 (RFC 6698)
+            val tlsaClass = DClass.IN
             
-            // Use RecursiveResolver to resolve TLSA record via Handshake
-            // TLSA is DNS record type 52 (RFC 6698)
-            val dnsMessage = RecursiveResolver.resolve(tlsaName, 52)
+            // Step 1: Check cache first
+            val cached = CacheManager.get(tlsaName, tlsaType, tlsaClass)
+            if (cached != null) {
+                try {
+                    val cachedMessage = Message(cached)
+                    val answers = cachedMessage.getSection(Section.ANSWER)
+                    val tlsaRecords = answers.filterIsInstance<TLSARecord>()
+                    if (tlsaRecords.isNotEmpty()) {
+                        return@withContext tlsaRecords
+                    }
+                } catch (e: Exception) {
+                    // Corrupted cache entry, remove it and continue
+                    CacheManager.remove(tlsaName, tlsaType, tlsaClass)
+                }
+            }
+            
+            // Step 2: Cache miss - resolve from blockchain via RecursiveResolver
+            val dnsMessage = RecursiveResolver.resolve(tlsaName, tlsaType)
             if (dnsMessage == null) {
-                return@withContext null
+                return@withContext emptyList()
             }
             
             val answers = dnsMessage.getSection(Section.ANSWER)
             val tlsaRecords = answers.filterIsInstance<TLSARecord>()
             
-            if (tlsaRecords.isEmpty()) {
-                return@withContext null
+            // Step 3: Cache the result if we got TLSA records
+            if (tlsaRecords.isNotEmpty()) {
+                val ttl = answers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
+                val wireData = dnsMessage.toWire()
+                CacheManager.put(tlsaName, tlsaType, tlsaClass, wireData, ttl)
+                
+                // Log TLSA records for debugging
+                Log.d("DaneVerifier", "Found ${tlsaRecords.size} TLSA record(s) for $tlsaName:")
+                tlsaRecords.forEachIndexed { index, tlsa ->
+                    val parsed = parseTLSA(tlsa)
+                    if (parsed != null) {
+                        val hashHex = parsed.data.joinToString("") { "%02x".format(it) }
+                        Log.d("DaneVerifier", "  TLSA[$index]: Usage=${parsed.usage}, Selector=${parsed.selector}, MatchType=${parsed.matchingType}, Hash=$hashHex")
+                    }
+                }
             }
             
-            // Return first TLSA record (RFC 6698 allows multiple, but we use first)
-            val tlsa = tlsaRecords[0]
-            // Log TLSA record found
-            return@withContext tlsa
+            return@withContext tlsaRecords
             
         } catch (e: Exception) {
-            null
+            emptyList()
         }
     }
     
     /**
-     * Get server certificate by connecting to HTTPS endpoint
+     * Get full server certificate chain by connecting to HTTPS endpoint
      * For Handshake domains, resolves the domain to IP first using our resolver
      */
-    private suspend fun getServerCertificate(host: String, port: Int): X509Certificate? = withContext(Dispatchers.IO) {
+    private suspend fun getServerCertificateChain(host: String, port: Int): List<X509Certificate> = withContext(Dispatchers.IO) {
         try {
             // Step 1: Resolve hostname to IP address (for Handshake domains, use our resolver)
             val ipAddress = resolveHostToIP(host)
             if (ipAddress == null) {
-                return@withContext null
+                Log.d("DaneVerifier", "Failed to resolve hostname to IP: $host")
+                return@withContext emptyList()
             }
             
+            Log.d("DaneVerifier", "Resolved $host to IP: $ipAddress")
             
             // Create a trust-all manager for fetching certificate (we verify via DANE)
             val trustAllManager = object : X509TrustManager {
@@ -166,42 +247,61 @@ object DaneVerifier {
                 override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
             }
             
+            // Create SSL context with SNI support
             val sslContext = SSLContext.getInstance("TLS")
             sslContext.init(null, arrayOf(trustAllManager as TrustManager), null)
             
-            // Connect to IP address directly, but set Host header for SNI
-            val url = URL("https://$ipAddress:$port")
-            val connection = url.openConnection() as HttpsURLConnection
-            connection.sslSocketFactory = sslContext.socketFactory
-            // Set Host header for SNI (Server Name Indication) - critical for correct certificate
-            connection.setRequestProperty("Host", host)
-            connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, session ->
-                // Verify hostname matches certificate (but we trust all certs for DANE verification)
-                val peerHost = session.peerHost
-                true // Accept any hostname since we verify via DANE
-            }
-            connection.connectTimeout = CONNECTION_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
-            connection.requestMethod = "GET"
+            // Use SSLSocket directly to properly set SNI (Server Name Indication)
+            // HttpsURLConnection doesn't always set SNI correctly when using IP address
+            val socketFactory = sslContext.socketFactory
+            val socket = socketFactory.createSocket(ipAddress, port) as javax.net.ssl.SSLSocket
             
-            // Trigger SSL handshake by attempting to read response
-            // This is necessary because connect() doesn't always trigger the handshake
-            try {
-                val responseCode = connection.responseCode
-            } catch (e: Exception) {
-                // Even if response fails, we might have the certificate from the handshake
+            // Set SNI hostname - this is critical for getting the correct certificate
+            val sslParams = socket.sslParameters
+            val sniHostNames = listOf(javax.net.ssl.SNIHostName(host))
+            sslParams.serverNames = sniHostNames
+            socket.sslParameters = sslParams
+            
+            // Start handshake
+            socket.startHandshake()
+            
+            // Get certificate chain from the SSL session
+            val session = socket.session
+            val certChain = session.peerCertificates.mapNotNull { it as? X509Certificate }
+            
+            socket.close()
+            
+            if (certChain.isEmpty()) {
+                Log.d("DaneVerifier", "No certificates found in chain for $host")
+            } else {
+                Log.d("DaneVerifier", "Found ${certChain.size} certificate(s) in chain for $host")
+                
+                // Log certificate details for debugging
+                certChain.forEachIndexed { index, cert ->
+                    val subject = cert.subjectX500Principal.name
+                    val issuer = cert.issuerX500Principal.name
+                    
+                    // Calculate SPKI fingerprint (SHA-256 of SubjectPublicKeyInfo)
+                    val spkiBytes = cert.publicKey.encoded
+                    val sha256 = MessageDigest.getInstance("SHA-256")
+                    val spkiHash = sha256.digest(spkiBytes)
+                    val spkiFingerprint = spkiHash.joinToString("") { "%02x".format(it) }
+                    
+                    // Calculate full cert fingerprint
+                    val certHash = sha256.digest(cert.encoded)
+                    val certFingerprint = certHash.joinToString("") { "%02x".format(it) }
+                    
+                    Log.d("DaneVerifier", "  Cert[$index]: Subject=$subject")
+                    Log.d("DaneVerifier", "  Cert[$index]: Issuer=$issuer")
+                    Log.d("DaneVerifier", "  Cert[$index]: SPKI SHA-256=$spkiFingerprint")
+                    Log.d("DaneVerifier", "  Cert[$index]: Full Cert SHA-256=$certFingerprint")
+                }
             }
             
-            // Get certificate from the SSL session (available after handshake)
-            val certificates = connection.serverCertificates
-            if (certificates.isNotEmpty() && certificates[0] is X509Certificate) {
-                val cert = certificates[0] as X509Certificate
-                return@withContext cert
-            }
-            
-            null
+            return@withContext certChain
         } catch (e: Exception) {
-            null
+            Log.e("DaneVerifier", "Error fetching certificate chain for $host:$port", e)
+            emptyList()
         }
     }
     
@@ -243,9 +343,10 @@ object DaneVerifier {
     }
     
     /**
-     * Verify that server certificate matches TLSA record
+     * Verify that certificate chain matches any TLSA record
      * 
      * Supports:
+     * - Usage 2 (DANE-TA): Trust anchor (CA certificate in chain)
      * - Usage 3 (DANE-EE): Certificate usage (end entity)
      * - Selector 0: Full certificate
      * - Selector 1: SubjectPublicKeyInfo
@@ -253,30 +354,153 @@ object DaneVerifier {
      * - MatchType 1: SHA-256 hash
      * - MatchType 2: SHA-512 hash
      */
-    private fun verifyCertificateMatchesTLSA(cert: X509Certificate, tlsa: TLSARecord): Boolean {
+    private fun verifyCertificateChainMatchesTLSA(
+        certChain: List<X509Certificate>,
+        tlsaRecords: List<TLSARecord>
+    ): MatchResult {
+        if (certChain.isEmpty() || tlsaRecords.isEmpty()) {
+            Log.d("DaneVerifier", "verifyCertificateChainMatchesTLSA: Empty chain or records")
+            return MatchResult(false, null)
+        }
+        
+        val endEntityCert = certChain[0]
+        
+        // Check each TLSA record against the certificate chain
+        for ((index, tlsa) in tlsaRecords.withIndex()) {
+            val parsed = parseTLSA(tlsa)
+            if (parsed == null) {
+                Log.d("DaneVerifier", "verifyCertificateChainMatchesTLSA: Failed to parse TLSA[$index]")
+                continue
+            }
+            
+            val tlsaHashHex = parsed.data.joinToString("") { "%02x".format(it) }
+            Log.d("DaneVerifier", "Checking TLSA[$index]: Usage=${parsed.usage}, Selector=${parsed.selector}, MatchType=${parsed.matchingType}, ExpectedHash=$tlsaHashHex")
+            
+            // Determine which certificate to check based on usage
+            val certToCheck = when (parsed.usage) {
+                2 -> {
+                    // DANE-TA: Check CA certificates in chain (skip end entity)
+                    certChain.drop(1).firstOrNull()
+                }
+                3 -> {
+                    // DANE-EE: Check end entity certificate
+                    endEntityCert
+                }
+                else -> {
+                    // Unsupported usage
+                    Log.d("DaneVerifier", "TLSA[$index]: Unsupported usage ${parsed.usage}")
+                    continue
+                }
+            }
+            
+            if (certToCheck == null) {
+                Log.d("DaneVerifier", "TLSA[$index]: No certificate found for usage ${parsed.usage}")
+                continue
+            }
+            
+            // Calculate what we're comparing
+            val certData = when (parsed.selector) {
+                0 -> certToCheck.encoded  // Full certificate
+                1 -> certToCheck.publicKey.encoded  // SubjectPublicKeyInfo
+                else -> {
+                    Log.d("DaneVerifier", "TLSA[$index]: Unsupported selector ${parsed.selector}")
+                    continue
+                }
+            }
+            
+            val sha256 = MessageDigest.getInstance("SHA-256")
+            val certHash = when (parsed.matchingType) {
+                0 -> certData  // Exact match
+                1 -> sha256.digest(certData)  // SHA-256
+                2 -> MessageDigest.getInstance("SHA-512").digest(certData)  // SHA-512
+                else -> {
+                    Log.d("DaneVerifier", "TLSA[$index]: Unsupported matchType ${parsed.matchingType}")
+                    continue
+                }
+            }
+            val certHashHex = certHash.joinToString("") { "%02x".format(it) }
+            Log.d("DaneVerifier", "TLSA[$index]: CertHash=$certHashHex")
+            
+            // Verify match
+            val matches = verifyCertificateMatchesTLSA(certToCheck, parsed)
+            Log.d("DaneVerifier", "TLSA[$index]: Match=${matches}")
+            
+            if (matches) {
+                Log.d("DaneVerifier", "✓ TLSA[$index] MATCHED!")
+                return MatchResult(
+                    true,
+                    VerificationResult.MatchedTLSA(
+                        usage = parsed.usage,
+                        selector = parsed.selector,
+                        matchingType = parsed.matchingType,
+                        index = index
+                    )
+                )
+            }
+        }
+        
+        Log.d("DaneVerifier", "No TLSA records matched")
+        return MatchResult(false, null)
+    }
+    
+    /**
+     * Parsed TLSA record data
+     */
+    private data class ParsedTLSA(
+        val usage: Int,
+        val selector: Int,
+        val matchingType: Int,
+        val data: ByteArray
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+            other as ParsedTLSA
+            if (usage != other.usage) return false
+            if (selector != other.selector) return false
+            if (matchingType != other.matchingType) return false
+            if (!data.contentEquals(other.data)) return false
+            return true
+        }
+        
+        override fun hashCode(): Int {
+            var result = usage
+            result = 31 * result + selector
+            result = 31 * result + matchingType
+            result = 31 * result + data.contentHashCode()
+            return result
+        }
+    }
+    
+    /**
+     * Match result from verification
+     */
+    private data class MatchResult(
+        val isValid: Boolean,
+        val matchedRecord: VerificationResult.MatchedTLSA?
+    )
+    
+    /**
+     * Parse TLSA record from wire format
+     */
+    private fun parseTLSA(tlsa: TLSARecord): ParsedTLSA? {
         try {
-            // Parse TLSA record from wire format
-            // TLSA format: [1 byte usage][1 byte selector][1 byte matchType][variable data]
-            // Get the rdata portion from the wire format
             val wireData = tlsa.toWire(Section.ANSWER)
-            // Wire format: [name][type(2)][class(2)][ttl(4)][rdlength(2)][rdata...]
-            // Skip to rdata section
             val nameBytes = tlsa.name.toWireCanonical()
-            val headerLen = nameBytes.size + 10 // name + type(2) + class(2) + ttl(4) + rdlength(2)
+            val headerLen = nameBytes.size + 10
             
             if (wireData.size < headerLen + 2) {
-                return false
+                return null
             }
             
             val rdlength = ((wireData[headerLen - 2].toInt() and 0xFF) shl 8) or (wireData[headerLen - 1].toInt() and 0xFF)
             if (wireData.size < headerLen + rdlength || rdlength < 3) {
-                return false
+                return null
             }
             
             val rdata = wireData.sliceArray(headerLen until headerLen + rdlength)
-            
             if (rdata.size < 3) {
-                return false
+                return null
             }
             
             val usage = rdata[0].toInt() and 0xFF
@@ -284,54 +508,70 @@ object DaneVerifier {
             val matchType = rdata[2].toInt() and 0xFF
             val tlsaData = rdata.sliceArray(3 until rdata.size)
             
-            
-            // Only support Usage 3 (DANE-EE: Domain-issued certificate)
-            if (usage != 3) {
-                return false
-            }
-            
+            return ParsedTLSA(usage, selector, matchType, tlsaData)
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    /**
+     * Verify that a certificate matches a parsed TLSA record
+     */
+    private fun verifyCertificateMatchesTLSA(cert: X509Certificate, parsed: ParsedTLSA): Boolean {
+        try {
             // Get data to match based on selector
-            val certData = when (selector) {
-                0 -> {
-                    // Full certificate
-                    cert.encoded
-                }
-                1 -> {
-                    // SubjectPublicKeyInfo
-                    cert.publicKey.encoded
-                }
-                else -> {
-                    return false
-                }
+            val certData = when (parsed.selector) {
+                0 -> cert.encoded  // Full certificate
+                1 -> cert.publicKey.encoded  // SubjectPublicKeyInfo
+                else -> return false
             }
             
             // Compare based on match type
-            val matches = when (matchType) {
-                0 -> {
-                    // No hash - compare full data
-                    java.util.Arrays.equals(certData, tlsaData)
-                }
+            return when (parsed.matchingType) {
+                0 -> java.util.Arrays.equals(certData, parsed.data)  // Exact match
                 1 -> {
-                    // SHA-256 hash
                     val sha256 = MessageDigest.getInstance("SHA-256")
                     val certHash = sha256.digest(certData)
-                    java.util.Arrays.equals(certHash, tlsaData)
+                    java.util.Arrays.equals(certHash, parsed.data)
                 }
                 2 -> {
-                    // SHA-512 hash
                     val sha512 = MessageDigest.getInstance("SHA-512")
                     val certHash = sha512.digest(certData)
-                    java.util.Arrays.equals(certHash, tlsaData)
+                    java.util.Arrays.equals(certHash, parsed.data)
                 }
-                else -> {
-                    false
-                }
+                else -> false
             }
-            return matches
-            
         } catch (e: Exception) {
             return false
         }
+    }
+    
+    /**
+     * Extract certificate information for inspection report
+     */
+    private fun extractCertificateInfo(cert: X509Certificate): VerificationResult.CertificateInfo {
+        val subject = cert.subjectX500Principal.name
+        val issuer = cert.issuerX500Principal.name
+        val isSelfSigned = subject == issuer
+        
+        // Calculate SPKI fingerprint (SHA-256 of SubjectPublicKeyInfo)
+        // This matches OpenSSL: openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256
+        val spkiBytes = cert.publicKey.encoded
+        val sha256 = MessageDigest.getInstance("SHA-256")
+        val spkiHash = sha256.digest(spkiBytes)
+        val spkiFingerprint = spkiHash.joinToString("") { "%02x".format(it) }  // Lowercase hex, no colons (matches OpenSSL format)
+        
+        val validFrom = cert.notBefore.toString()
+        val validTo = cert.notAfter.toString()
+        
+        return VerificationResult.CertificateInfo(
+            subject = subject,
+            issuer = issuer,
+            spkiFingerprint = spkiFingerprint,
+            validFrom = validFrom,
+            validTo = validTo,
+            isSelfSigned = isSelfSigned
+        )
     }
 }
 
