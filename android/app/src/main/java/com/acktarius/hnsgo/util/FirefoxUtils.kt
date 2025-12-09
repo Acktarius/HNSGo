@@ -51,7 +51,6 @@ object FirefoxUtils {
                 }
                 val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
                 if (resolveInfo != null) {
-                    Log.d("FirefoxUtils", "Found Firefox via direct package resolution: $packageName")
                     return packageName
                 }
             } catch (e: Exception) {
@@ -65,39 +64,28 @@ object FirefoxUtils {
             @Suppress("DEPRECATION")
             val handlers = packageManager.queryIntentActivities(intent, 0)
             
-            Log.d("FirefoxUtils", "Found ${handlers.size} handlers for https:// URLs")
-            
-            // Log all package names for debugging
-            val allPackages = handlers.mapNotNull { it.activityInfo?.packageName }
-            Log.d("FirefoxUtils", "Handler packages: ${allPackages.joinToString(", ")}")
-            
             // Look for known Firefox packages among handlers
+            val allPackages = handlers.mapNotNull { it.activityInfo?.packageName }
             val foundPackage = allPackages.firstOrNull { packageName ->
                 val matches = FIREFOX_PACKAGE_PREFIXES.any { prefix ->
                     packageName == prefix || packageName.startsWith("$prefix.")
-                }
-                if (packageName.startsWith("org.mozilla.")) {
-                    Log.d("FirefoxUtils", "Found org.mozilla.* package: $packageName (matches: $matches)")
                 }
                 matches
             }
             
             if (foundPackage != null) {
-                Log.d("FirefoxUtils", "Found Firefox via intent resolution: $foundPackage")
                 return foundPackage
             }
             
             // Also check for any org.mozilla.* package as fallback
             val anyMozilla = allPackages.firstOrNull { it.startsWith("org.mozilla.") }
             if (anyMozilla != null) {
-                Log.d("FirefoxUtils", "Found org.mozilla.* package (not in known list): $anyMozilla")
                 return anyMozilla
             }
         } catch (e: Exception) {
             Log.w("FirefoxUtils", "Error during intent resolution", e)
         }
         
-        Log.d("FirefoxUtils", "Firefox not found")
         return null
     }
     
