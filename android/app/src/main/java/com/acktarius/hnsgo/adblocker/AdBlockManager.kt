@@ -1,4 +1,4 @@
-package com.acktarius.hnsgo
+package com.acktarius.hnsgo.adblocker
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -13,6 +13,11 @@ import java.util.Collections
  * Simple ad blocking manager using blacklists from known references.
  * KISS approach: downloads and maintains a set of blocked domains.
  * Blacklist is stored in local storage as a text file.
+ * 
+ * Priority order:
+ * 1. Check Bandw whitelist -> allow (skip ad blocker)
+ * 2. Check Bandw blacklist -> NXDOMAIN (skip ad blocker)
+ * 3. Check downloaded blacklist -> block if found
  */
 object AdBlockManager {
     private val blockedDomains = Collections.synchronizedSet(mutableSetOf<String>())
@@ -46,20 +51,14 @@ object AdBlockManager {
     private var usePrivacyMode = false
     
     /**
-     * Get the active blacklist URLs based on current mode
-     * - If ad blocking disabled: returns empty list (blocking is disabled)
-     * - If ad blocking enabled + privacy disabled: returns BASE_BLACKLIST_URLS
-     * - If ad blocking enabled + privacy enabled: returns BASE_BLACKLIST_URLS + PRIVACY_BLACKLIST_URLS
+     * Get the blacklist URLs to download
+     * Always returns BASE_BLACKLIST_URLS + PRIVACY_BLACKLIST_URLS
+     * (download both so privacy mode can be toggled without re-downloading)
      */
     private fun getBlacklistUrls(): List<String> {
-        if (!enabled) {
-            return emptyList()
-        }
-        return if (usePrivacyMode) {
-            BASE_BLACKLIST_URLS + PRIVACY_BLACKLIST_URLS
-        } else {
-            BASE_BLACKLIST_URLS
-        }
+        // Always download both BASE and PRIVACY lists
+        // Privacy mode toggle just controls whether to use PRIVACY lists, but they're already downloaded
+        return BASE_BLACKLIST_URLS + PRIVACY_BLACKLIST_URLS
     }
     
     /**
@@ -82,26 +81,55 @@ object AdBlockManager {
     
     /**
      * Initialize with context (should be called from MainActivity or DohService)
+     * Ensures state starts as false on first launch
      */
     fun init(ctx: Context) {
         context = ctx.applicationContext
         loadFromStorage()
+        // Load saved state (defaults to false if not found)
         loadEnabledState()
         loadPrivacyModeState()
+        // Ensure privacy mode is off if ad blocking is off
+        if (!enabled && usePrivacyMode) {
+            usePrivacyMode = false
+            savePrivacyModeState()
+        }
     }
     
     /**
      * Check if a domain should be blocked
+     * Priority:
+     * 1. Bandw whitelist -> Whitelisted (trusted domain, skip ad blocker, allow DNS resolution)
+     * 2. Bandw blacklist -> Blacklisted (return NXDOMAIN immediately, skip ad blocker)
+     * 3. Ad blocker blacklist -> Blocked (return NXDOMAIN if found in downloaded lists)
+     * 4. Otherwise -> Allowed (continue to normal DNS resolution)
+     * 
+     * @return BlockResult indicating the blocking decision
      */
-    fun isBlocked(domain: String): Boolean {
-        if (!enabled) return false
+    fun checkBlocked(domain: String): BlockResult {
+        // Priority 1: Check Bandw whitelist first
+        val bandwResult = Bandw.check(domain)
+        when (bandwResult) {
+            Bandw.WhitelistResult.Whitelisted -> return BlockResult.Whitelisted
+            Bandw.WhitelistResult.Blacklisted -> return BlockResult.Blacklisted
+            Bandw.WhitelistResult.Neither -> {
+                // Continue to ad blocker check
+            }
+        }
+        
+        // Priority 2: Check ad blocker (only if enabled and not in Bandw lists)
+        if (!enabled) {
+            return BlockResult.Allowed
+        }
         
         val normalizedDomain = domain.lowercase().trim()
-        if (normalizedDomain.isEmpty()) return false
+        if (normalizedDomain.isEmpty()) {
+            return BlockResult.Allowed
+        }
         
         // Check exact match
         if (blockedDomains.contains(normalizedDomain)) {
-            return true
+            return BlockResult.Blocked
         }
         
         // Check subdomain matches (e.g., "ads.example.com" matches "example.com" in blacklist)
@@ -109,11 +137,28 @@ object AdBlockManager {
         for (i in parts.indices) {
             val subdomain = parts.subList(i, parts.size).joinToString(".")
             if (blockedDomains.contains(subdomain)) {
-                return true
+                return BlockResult.Blocked
             }
         }
         
-        return false
+        return BlockResult.Allowed
+    }
+    
+    /**
+     * Result of blocking check
+     */
+    sealed class BlockResult {
+        /** Domain is whitelisted - trusted domain we know is not harmful, skip ad blocker and allow DNS resolution */
+        object Whitelisted : BlockResult()
+        
+        /** Domain is blacklisted (hardcoded) - block immediately */
+        object Blacklisted : BlockResult()
+        
+        /** Domain is blocked by ad blocker */
+        object Blocked : BlockResult()
+        
+        /** Domain is allowed */
+        object Allowed : BlockResult()
     }
     
     /**
@@ -150,9 +195,6 @@ object AdBlockManager {
         
         // Save to local storage
         saveToStorage(newBlockedDomains)
-        
-        enabled = true
-        saveEnabledState()
     }
     
     /**
@@ -216,6 +258,7 @@ object AdBlockManager {
     
     /**
      * Load enabled state from SharedPreferences
+     * Defaults to false if not found (first launch)
      */
     private fun loadEnabledState() {
         val ctx = context ?: return
@@ -223,6 +266,7 @@ object AdBlockManager {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             enabled = prefs.getBoolean(PREFS_KEY_ENABLED, false)
         } catch (e: Exception) {
+            enabled = false
         }
     }
     
@@ -240,6 +284,7 @@ object AdBlockManager {
     
     /**
      * Load privacy mode state from SharedPreferences
+     * Defaults to false if not found (first launch)
      */
     private fun loadPrivacyModeState() {
         val ctx = context ?: return
@@ -247,6 +292,7 @@ object AdBlockManager {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             usePrivacyMode = prefs.getBoolean(PREFS_KEY_PRIVACY_MODE, false)
         } catch (e: Exception) {
+            usePrivacyMode = false
         }
     }
     
@@ -276,6 +322,14 @@ object AdBlockManager {
                 blockedDomains.add(domain)
             }
         }
+    }
+    
+    /**
+     * Enable ad blocking (sets the flag, doesn't download - use refreshBlacklist() for that)
+     */
+    fun enable() {
+        enabled = true
+        saveEnabledState()
     }
     
     /**

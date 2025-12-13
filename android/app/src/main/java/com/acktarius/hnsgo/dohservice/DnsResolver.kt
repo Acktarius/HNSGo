@@ -1,7 +1,7 @@
 package com.acktarius.hnsgo.dohservice
 
 import android.util.Log
-import com.acktarius.hnsgo.AdBlockManager
+import com.acktarius.hnsgo.adblocker.AdBlockManager
 import com.acktarius.hnsgo.CacheManager
 import com.acktarius.hnsgo.Config
 import com.acktarius.hnsgo.RecursiveResolver
@@ -70,18 +70,42 @@ object DnsResolver {
         }
 
         // Priority 2: Check ad blocking (cache miss - check if domain should be blocked)
-        if (AdBlockManager.isBlocked(name)) {
-            val blockedMsg = Message(queryId).apply {
-                header.setFlag(org.xbill.DNS.Flags.QR.toInt())
-                header.rcode = Rcode.NXDOMAIN
-                if (originalQuestion != null) {
-                    addRecord(originalQuestion, Section.QUESTION)
-                }
+        val blockResult = AdBlockManager.checkBlocked(name)
+        when (blockResult) {
+            AdBlockManager.BlockResult.Whitelisted -> {
+                // Whitelisted - allow, continue to resolution
             }
-            val blockedWireData = blockedMsg.toWire()
-            // Cache blocked domain response (NXDOMAIN) with short TTL
-            CacheManager.put(name, type, dclass, blockedWireData, 60)
-            return ResolutionResult.Blocked(blockedMsg)
+            AdBlockManager.BlockResult.Blacklisted -> {
+                // Hardcoded blacklist from Bandw - return NXDOMAIN
+                val blockedMsg = Message(queryId).apply {
+                    header.setFlag(org.xbill.DNS.Flags.QR.toInt())
+                    header.rcode = Rcode.NXDOMAIN
+                    if (originalQuestion != null) {
+                        addRecord(originalQuestion, Section.QUESTION)
+                    }
+                }
+                val blockedWireData = blockedMsg.toWire()
+                // Cache blocked domain response (NXDOMAIN) with short TTL
+                CacheManager.put(name, type, dclass, blockedWireData, 60)
+                return ResolutionResult.Blocked(blockedMsg)
+            }
+            AdBlockManager.BlockResult.Blocked -> {
+                // Blocked by ad blocker - return NXDOMAIN
+                val blockedMsg = Message(queryId).apply {
+                    header.setFlag(org.xbill.DNS.Flags.QR.toInt())
+                    header.rcode = Rcode.NXDOMAIN
+                    if (originalQuestion != null) {
+                        addRecord(originalQuestion, Section.QUESTION)
+                    }
+                }
+                val blockedWireData = blockedMsg.toWire()
+                // Cache blocked domain response (NXDOMAIN) with short TTL
+                CacheManager.put(name, type, dclass, blockedWireData, 60)
+                return ResolutionResult.Blocked(blockedMsg)
+            }
+            AdBlockManager.BlockResult.Allowed -> {
+                // Allowed - continue to resolution
+            }
         }
 
         // Priority 3: If ICANN TLD -> forward to Quad9 (9.9.9.9)

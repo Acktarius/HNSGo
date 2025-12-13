@@ -109,12 +109,15 @@ object HeaderStorage {
      * Save header chain to disk
      * MEMORY OPTIMIZATION: Only saves new headers (incremental save)
      * Avoids rewriting entire chain on every save - uses append-only file for new headers
+     * 
+     * @param force If true, save even if no new headers (useful when stopping sync)
      */
     suspend fun saveHeaderChain(
         dataDir: File,
         headerChain: List<Header>,
         chainHeight: Int,
-        lastSavedHeight: Int = 0
+        lastSavedHeight: Int = 0,
+        force: Boolean = false
     ) = withContext(Dispatchers.IO) {
         try {
             val headersFile = File(dataDir, Config.HEADERS_FILE)
@@ -122,7 +125,7 @@ object HeaderStorage {
             val tempFile = File(dataDir, "${Config.HEADERS_FILE}.tmp")
             
             val newHeadersCount = chainHeight - lastSavedHeight
-            if (newHeadersCount <= 0) {
+            if (!force && newHeadersCount <= 0) {
                 return@withContext
             }
             

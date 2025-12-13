@@ -93,6 +93,18 @@ android {
             }
         }
     }
+    
+    // Customize APK output filename for release builds only
+    applicationVariants.all {
+        val variant = this
+        if (variant.buildType.name == "release") {
+            variant.outputs.all {
+                val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+                val versionName = variant.versionName
+                output.outputFileName = "HNSGo-v${versionName}.apk"
+            }
+        }
+    }
 }
 
 dependencies {

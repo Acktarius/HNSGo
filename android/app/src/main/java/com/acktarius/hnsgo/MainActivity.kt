@@ -66,6 +66,11 @@ import kotlinx.coroutines.delay
 import android.util.Log
 import android.widget.Toast
 import com.acktarius.hnsgo.util.FirefoxUtils
+import com.acktarius.hnsgo.adblocker.AdBlockManager
+import com.acktarius.hnsgo.ui.Step1Certificate
+import com.acktarius.hnsgo.ui.Step2FirefoxCA
+import com.acktarius.hnsgo.ui.Step3FirefoxDoH
+import com.acktarius.hnsgo.ui.Step4AdBlocking
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -169,6 +174,7 @@ fun HnsGoScreen(act: MainActivity) {
     var firefoxAvailable by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val typewriterFont = FontFamily.Monospace
+    var syncJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     
     // Check certificate installation status on mount
     LaunchedEffect(Unit) {
@@ -247,7 +253,7 @@ fun HnsGoScreen(act: MainActivity) {
                     
                     // Continue syncing headers in background to catch up to network
                     // This is important because resolution may fail if we're too far behind peers
-                    scope.launch(Dispatchers.IO) {
+                    syncJob = scope.launch(Dispatchers.IO) {
                         try {
                             // Start a coroutine to periodically update UI during sync
                             val uiUpdateJob = scope.launch(Dispatchers.IO) {
@@ -313,12 +319,35 @@ fun HnsGoScreen(act: MainActivity) {
                 }
             }
         } else {
-            act.stopService(Intent(act, DohService::class.java))
-            syncStatus = SyncStatus.IDLE
-            syncMessage = ""
-            showGuidance = false
-            debugQueryResult = null
-            debugQueryStatus = ""
+            // OFF: Stop DoH, stop sync, save headers
+            scope.launch(Dispatchers.IO) {
+                // 1. Stop DoH service first
+                withContext(Dispatchers.Main) {
+                    act.stopService(Intent(act, DohService::class.java))
+                }
+                
+                // 2. Stop sync job (cancel and wait for cancellation)
+                syncJob?.cancel()
+                syncJob?.join() // Wait for sync to finish cancellation
+                syncJob = null
+                
+                // 3. Save headers to preserve progress
+                try {
+                    SpvClient.forceSaveHeaders()
+                    android.util.Log.d("HNSGo", "MainActivity: Headers saved successfully on stop")
+                } catch (e: Exception) {
+                    android.util.Log.w("HNSGo", "MainActivity: Failed to save headers on stop", e)
+                }
+                
+                // 4. Update UI on main thread
+                withContext(Dispatchers.Main) {
+                    syncStatus = SyncStatus.IDLE
+                    syncMessage = ""
+                    showGuidance = false
+                    debugQueryResult = null
+                    debugQueryStatus = ""
+                }
+            }
         }
     }
 
@@ -349,7 +378,7 @@ fun HnsGoScreen(act: MainActivity) {
                 color = MaterialTheme.colorScheme.onBackground
             )
             
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(24.dp))
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -374,7 +403,7 @@ fun HnsGoScreen(act: MainActivity) {
         }
 
         if (enabled) {
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(24.dp))
                 
                 // Sync status
                 when (syncStatus) {
@@ -433,668 +462,51 @@ fun HnsGoScreen(act: MainActivity) {
                     Spacer(Modifier.height(16.dp))
                     
                     // Step 1: Install CA Certificate
-                    Text(
-                        "Step 1: Install CA Certificate",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = typewriterFont,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onBackground
+                    Step1Certificate(
+                        certInstalled = certInstalled,
+                        onCertInstalledChange = { certInstalled = it },
+                        act = act,
+                        typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(8.dp))
-                    
-                    if (!certInstalled) {
-                        Text(
-                            "The CA certificate must be installed in Android's trust store for Firefox to trust the DoH server.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Step 1.1: Save certificate
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            Text(
-                                "1.1 Tap ",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            Button(
-                                onClick = {
-                                    try {
-                                        val success = CertHelper.saveCertToDownloads(act)
-                                        if (success) {
-                                            Toast.makeText(act, "Certificate saved to Downloads", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(act, "Failed to save certificate", Toast.LENGTH_SHORT).show()
-                                        }
-                                    } catch (e: Exception) {
-                                        Toast.makeText(act, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Text(
-                                    "Save Certificate",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = typewriterFont,
-                                        fontSize = 10.sp
-                                    )
-                                )
-                            }
-                            Text(
-                                " to Downloads",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Text(
-                            "1.2 Tap the button below to open certificate installation settings",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Button(
-                            onClick = {
-                                try {
-                                    CertHelper.openCertificateInstallSettings(act)
-                                } catch (e: Exception) {
-                                    Toast.makeText(act, "Error opening settings", Toast.LENGTH_SHORT).show()
-                                    try {
-                                        act.startActivity(Intent(Settings.ACTION_SETTINGS))
-                                    } catch (e2: Exception) {
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            Text(
-                                "Open Certificate Settings",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                )
-                            )
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Text(
-                            "1.3 Tap 'Install from storage' → Select 'hns-go-ca.crt' from Downloads",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            "1.4 When prompted, select 'CA certificate' (NOT 'VPN & app user certificate' or 'Wi-Fi')",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            "⚠️ Important: You must select 'CA certificate' for Firefox to trust the DoH server",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 10.sp
-                            ),
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            "1.5 Enter name 'HNS Go CA' → Tap OK",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            Button(
-                                onClick = {
-                                    CertHelper.markCertAsInstalled(act)
-                                    certInstalled = true
-                                    Toast.makeText(act, "Marked as installed", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    "I've Installed It",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = typewriterFont,
-                                        fontSize = 11.sp
-                                    )
-                                )
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Text(
-                            "⚠️ Certificate must be installed before Firefox can use DoH",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 10.sp
-                            ),
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                        )
-                    } else {
-                        Text(
-                            "✓ CA Certificate is installed",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     // Step 2: Enable Third-Party CA in Firefox
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(0.9f)
-                    ) {
-                        Checkbox(
-                            checked = step2Completed,
-                            onCheckedChange = { step2Completed = it }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Step 2: Enable Third-Party CA in Firefox (Required)",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Step2FirefoxCA(
+                        step2Completed = step2Completed,
+                        onStep2CompletedChange = { step2Completed = it },
+                        typewriterFont = typewriterFont
+                    )
                     
-                    if (!step2Completed) {
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Text(
-                            "Firefox requires an additional setting to trust user-installed CA certificates:",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                        ) {
-                            Text(
-                                "2.1 Open Firefox → Settings → About Firefox",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                "2.2 Tap the Firefox logo 7 times to enable Secret Settings",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                "2.3 Go back to Settings → Enable 'Use third party CA certificates'",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                "⚠️ Without this step, Firefox will reject the DoH server certificate",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 10.sp
-                                ),
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                            )
-                        }
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     // Step 3: Configure Firefox DoH
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(0.9f)
-                    ) {
-                        Checkbox(
-                            checked = step3Completed,
-                            onCheckedChange = { step3Completed = it }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Step 3: Configure Firefox DoH",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Step3FirefoxDoH(
+                        step3Completed = step3Completed,
+                        onStep3CompletedChange = { step3Completed = it },
+                        act = act,
+                        firefoxAvailable = firefoxAvailable,
+                        typewriterFont = typewriterFont
+                    )
                     
-                    if (!step3Completed) {
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                        ) {
-                            Text(
-                                "3.1 Open Firefox → Settings → Network Settings",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                "3.2 Enable 'DNS over HTTPS' → Select 'Custom'",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                "3.3 Paste the DoH URL below:",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // DoH URL with copy button
-                        Card(
-                            modifier = Modifier.fillMaxWidth(0.95f),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            )
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp)
-                            ) {
-                                Text(
-                                    "https://127.0.0.1:${Config.DOH_PORT}/dns-query",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = typewriterFont,
-                                        fontSize = 11.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
-                                            clipboard.setPrimaryClip(clip)
-                                            Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                        }
-                                )
-                                IconButton(
-                                    onClick = {
-                                        val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText("DoH Endpoint", "https://127.0.0.1:${Config.DOH_PORT}/dns-query")
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(act, "DoH URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.ContentCopy,
-                                        contentDescription = "Copy DoH URL",
-                                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                        ) {
-                            Text(
-                                "3.4 Save settings and restart Firefox",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(8.dp))
-                            
-                            Text(
-                                "3.5 After restarting Firefox, visit this URL to accept the certificate:",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Health check URL with copy and open buttons
-                        Card(
-                            modifier = Modifier.fillMaxWidth(0.95f),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            )
-                        ) {
-                            Column(Modifier.padding(12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        "https://127.0.0.1:${Config.DOH_PORT}/health",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontFamily = typewriterFont,
-                                            fontSize = 11.sp
-                                        ),
-                                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable {
-                                                val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                val clip = ClipData.newPlainText("Health Check URL", "https://127.0.0.1:${Config.DOH_PORT}/health")
-                                                clipboard.setPrimaryClip(clip)
-                                                Toast.makeText(act, "Health check URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                            }
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            val clipboard = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            val clip = ClipData.newPlainText("Health Check URL", "https://127.0.0.1:${Config.DOH_PORT}/health")
-                                            clipboard.setPrimaryClip(clip)
-                                            Toast.makeText(act, "Health check URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ContentCopy,
-                                            contentDescription = "Copy Health Check URL",
-                                            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(4.dp))
-                        
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                        ) {
-                            Text(
-                                "This will trigger Firefox to show a certificate warning. Click 'Advanced' → 'Accept the Risk and Continue'.",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                            )
-                            
-                            Spacer(Modifier.height(4.dp))
-                            
-                            Text(
-                                "⚠️ Firefox must accept the certificate before DoH queries will work",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 10.sp
-                                ),
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-                            )
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))                        
-                        
-                        Text(
-                            "To verify: Open Firefox → about:networking#dns → Check if queries show your DoH URL",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 10.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     // Step 4: Enable Ad Blocking
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(0.9f)
-                    ) {
-                        Checkbox(
-                            checked = step4Completed,
-                            onCheckedChange = { step4Completed = it }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Step 4: Enable Ad Blocking",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Step4AdBlocking(
+                        step4Completed = step4Completed,
+                        onStep4CompletedChange = { step4Completed = it },
+                        adBlockingEnabled = adBlockingEnabled,
+                        onAdBlockingEnabledChange = { adBlockingEnabled = it },
+                        adBlockingLoading = adBlockingLoading,
+                        onAdBlockingLoadingChange = { adBlockingLoading = it },
+                        privacyModeEnabled = privacyModeEnabled,
+                        onPrivacyModeEnabledChange = { privacyModeEnabled = it },
+                        act = act,
+                        scope = scope,
+                        typewriterFont = typewriterFont
+                    )
                     
-                    if (!step4Completed) {
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Text(
-                            "Block ads and trackers by using a blacklist from known references:",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = typewriterFont,
-                                fontSize = 11.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Row 1: Main toggle switch
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            Switch(
-                                checked = adBlockingEnabled,
-                                onCheckedChange = { newValue ->
-                                    adBlockingEnabled = newValue
-                                    if (newValue) {
-                                        // Refresh blacklist when turned ON
-                                        adBlockingLoading = true
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                AdBlockManager.refreshBlacklist()
-                                                withContext(Dispatchers.Main) {
-                                                    adBlockingLoading = false
-                                                    Toast.makeText(act, "Ad blocking enabled", Toast.LENGTH_SHORT).show()
-                                                }
-                                            } catch (e: Exception) {
-                                                withContext(Dispatchers.Main) {
-                                                    adBlockingLoading = false
-                                                    Toast.makeText(act, "Error loading blacklist: ${e.message}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        AdBlockManager.disable()
-                                        privacyModeEnabled = false  // Privacy mode requires ad blocking
-                                        Toast.makeText(act, "Ad blocking disabled", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                enabled = !adBlockingLoading
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            if (adBlockingLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text(
-                                if (adBlockingEnabled) "ON" else "OFF",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 14.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "(list refresh on flip back and forth)",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 10.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Row 2: Privacy Mode Toggle
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(0.9f)
-                        ) {
-                            Switch(
-                                checked = privacyModeEnabled,
-                                onCheckedChange = { newValue ->
-                                    privacyModeEnabled = newValue
-                                    AdBlockManager.setPrivacyMode(newValue)
-                                    if (adBlockingEnabled) {
-                                        // If ad blocking is enabled, refresh blacklist when privacy mode changes
-                                        // This updates both BASE and PRIVACY lists
-                                        adBlockingLoading = true
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                AdBlockManager.refreshBlacklist()
-                                                withContext(Dispatchers.Main) {
-                                                    adBlockingLoading = false
-                                                    Toast.makeText(act, "Privacy mode ${if (newValue) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            } catch (e: Exception) {
-                                                withContext(Dispatchers.Main) {
-                                                    adBlockingLoading = false
-                                                    Toast.makeText(act, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        Toast.makeText(act, "Privacy mode ${if (newValue) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                enabled = adBlockingEnabled && !adBlockingLoading
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            Text(
-                                "Stricter Mode minimize tracking",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = typewriterFont,
-                                    fontSize = 11.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     Text(
                         "DANE Inspector",
@@ -1124,7 +536,7 @@ fun HnsGoScreen(act: MainActivity) {
                         onValueChange = { daneUrl = it },
                         label = {
                             Text(
-                                "URL (e.g., https://nathan.woodburn/)",
+                                "URL (e.g., https://dweb.conceal/)",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp
@@ -1273,6 +685,65 @@ fun HnsGoScreen(act: MainActivity) {
                 onCollapse = { learnMoreExpanded.value = false }
             ) {
                 Column(Modifier.padding(16.dp)) {
+                    // How to install section - only visible when Firefox is discovered
+                    if (firefoxAvailable) {
+                        Text(
+                            "How to install",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = typewriterFont,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Extended step by step guide",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "https://127.0.0.1:${Config.DOH_PORT}/index.html",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = typewriterFont
+                            ),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                try {
+                                    val firefoxPackage = FirefoxUtils.getFirefoxPackageName(act)
+                                    val guideUrl = "https://127.0.0.1:${Config.DOH_PORT}/index.html"
+                                    
+                                    requireNotNull(firefoxPackage) { "Firefox package not found" }
+                                    
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(guideUrl)).apply {
+                                        setPackage(firefoxPackage)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    act.startActivity(intent)
+                                    Toast.makeText(act, "Opening in Firefox...", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(act, "Error opening Firefox: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Open in Firefox",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = typewriterFont,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                        
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    
                     Text(
                         "How to uninstall the HNS Go certificate:",
                         style = MaterialTheme.typography.bodyMedium.copy(

@@ -236,6 +236,28 @@ object SpvClient {
     }
     
     /**
+     * Force save headers to disk (e.g., when user stops sync)
+     * This ensures progress is preserved even if we haven't reached the save threshold
+     */
+    suspend fun forceSaveHeaders() = withContext(Config.HEADER_SYNC_DISPATCHER) {
+        // Check if SpvClient has been initialized (dataDir is set)
+        if (!::dataDir.isInitialized) {
+            android.util.Log.d("HNSGo", "SpvClient: Cannot save headers - not initialized yet")
+            return@withContext
+        }
+        
+        val currentFirstInMemory = synchronized(headerChain) {
+            if (headerChain.isEmpty()) {
+                Config.CHECKPOINT_HEIGHT
+            } else {
+                maxOf(Config.CHECKPOINT_HEIGHT, chainHeight - headerChain.size + 1)
+            }
+        }
+        HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, currentFirstInMemory, force = true)
+        android.util.Log.d("HNSGo", "SpvClient: Force saved headers at height $chainHeight")
+    }
+    
+    /**
      * Resolve Handshake domain to DNS records
      */
     suspend fun resolve(name: String): List<Record>? = withContext(Config.NAME_QUERY_DISPATCHER) {

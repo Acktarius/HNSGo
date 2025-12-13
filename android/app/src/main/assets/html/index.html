@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HNS Go - Installation Guide</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000000;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 24px;
+            margin-bottom: 16px;
+        }
+        h2 {
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: bold;
+            margin-top: 20px;
+            margin-bottom: 12px;
+        }
+        p {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 8px;
+        }
+        .step {
+            margin-bottom: 16px;
+        }
+        .step-number {
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        .warning {
+            color: rgba(255, 0, 0, 0.9);
+            font-size: 10px;
+            margin-top: 4px;
+        }
+        .screenshot {
+            max-width: 100%;
+            height: auto;
+            margin: 12px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .code {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            margin: 8px 0;
+            word-break: break-all;
+        }
+        .button-text {
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.9);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HNS Go - Step by Step Installation Guide</h1>
+        
+        <h2>Step 1: Install CA Certificate (Required)</h2>
+        <div class="step">
+            <p>The CA certificate must be installed in Android's trust store for Firefox to trust the DoH server.</p>
+            
+            <p class="step-number">1.1 Tap "Save Certificate" to Downloads</p>
+            <!-- <img src="/screenshot/screenshot011.png" alt="Save Certificate button" class="screenshot"> -->
+            
+            <p class="step-number">1.2 Tap the button below to go to Security and privacy settings, from there, select More security & Privacy → Encryption & Credentials → Install a certificate</p>
+            <p class="button-text">Security & Privacy settings</p>
+            <img src="screenshot/screenshot012.png" alt="Security settings navigation" class="screenshot">
+            
+            <p class="step-number">1.3 Tap on 'CA certificate' → 'Install anyway'</p>
+            <img src="screenshot/screenshot013.png" alt="Install from storage" class="screenshot">
+            
+            <p class="step-number">1.4 look for the file 'hns-go-ca.crt' in Downloads and select it</p>
+            <!-- <img src="screenshot/screenshot014.png" alt="Select CA certificate" class="screenshot"> -->
+            
+            <p class="step-number">1.5 Enter name 'HNS Go CA' → Tap OK</p>
+            <!-- <img src="screenshot/screenshot015.png" alt="Enter certificate name" class="screenshot"> -->
+            
+            <p class="warning">⚠️ Certificate must be installed before Firefox can use DoH</p>
+        </div>
+
+        <h2>Step 2: Enable Third-Party CA in Firefox (Required)</h2>
+        <div class="step">
+            <p>Firefox requires an additional setting to trust user-installed CA certificates:</p>
+            
+            <p class="step-number">2.1 Open Firefox → Settings → About Firefox</p>
+            <img src="screenshot/screenshot021.png" alt="Firefox About" class="screenshot">
+            
+            <p class="step-number">2.2 Tap the Firefox logo 7 times to enable Secret Settings</p>
+            <!-- <img src="screenshot/screenshot022.png" alt="Tap Firefox logo 7 times" class="screenshot"> -->
+            
+            <p class="step-number">2.3 Go to Settings → Secret Settings → Enable 'Use third party CA certificates'</p>
+            <img src="screenshot/screenshot023.png" alt="Secret Settings" class="screenshot">
+            <img src="screenshot/screenshot123.png" alt="Enable third party CA" class="screenshot">
+            
+            <p class="warning">⚠️ Without this step, Firefox will reject the DoH server certificate</p>
+        </div>
+
+        <h2>Step 3: Configure Firefox DoH</h2>
+        <div class="step">
+            <p class="step-number">3.1 Open Firefox → Settings → Privacy and security</p>
+            <img src="screenshot/screenshot031.png" alt="Privacy and security settings" class="screenshot">
+            
+            <p class="step-number">3.2 Enable 'DNS over HTTPS' → Select 'Max Protection'</p>
+            <!-- <img src="screenshot/screenshot032.png" alt="Enable DNS over HTTPS" class="screenshot"> -->
+            
+            <p class="step-number">3.3 Choose provider 'Custom' and paste the DoH URL below:</p>
+            <div class="code">https://127.0.0.1:8443/dns-query</div>
+            <img src="screenshot/screenshot033.png" alt="Custom DoH provider" class="screenshot">
+            
+            <p class="step-number">3.4 Quit (Force Stop) and restart Firefox</p>
+            <img src="screenshot/screenshot034.png" alt="Save settings" class="screenshot">
+            
+            <p class="step-number">3.5 After restarting Firefox, visit this URL to accept the certificate:</p>
+            <div class="code">https://127.0.0.1:8443/health</div>
+            <!-- <img src="screenshot/screenshot035.png" alt="Accept certificate warning" class="screenshot"> -->
+            
+            <p>This will trigger Firefox to show a certificate warning. Click 'Advanced' → 'Accept the Risk and Continue'.</p>
+            <p class="warning">⚠️ Firefox must accept the certificate before DoH queries will work</p>
+            
+            <p>To verify: Open Firefox → about:networking#dns → Check if queries show your DoH URL</p>
+        </div>
+
+        <h2>Step 4: Enable Ad Blocking</h2>
+        <div class="step">
+            <p>Block ads and trackers by using a blacklist from known references:</p>
+            
+            <p class="step-number">4.1 Enable the Ad Blocking toggle in HNS Go app</p>
+            <span class="regular-text">list is updated once toggled on, sources: StevenBlack, OISD, AdGuard</span>
+            <img src="screenshot/screenshot041.png" alt="Enable ad blocking" class="screenshot">
+            
+            <p class="step-number">4.2 (Optional) Enable "Stricter Mode minimize tracking" for enhanced privacy</p>
+            <img src="screenshot/screenshot042.png" alt="Privacy mode toggle" class="screenshot">
+            
+            <p>The blacklist will refresh automatically when toggled on or off.</p>
+        </div>
+    </div>
+</body>
+</html>
+

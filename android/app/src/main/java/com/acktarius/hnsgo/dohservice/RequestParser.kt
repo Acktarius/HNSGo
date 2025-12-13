@@ -11,26 +11,32 @@ import fi.iki.elonen.NanoHTTPD.Response.Status
  * Handles parsing of DoH requests (GET and POST methods per RFC 8484)
  */
 object RequestParser {
+    
     /**
      * Parse DNS query from DoH request
      * @return Pair of (queryBytes, errorResponse) - if errorResponse is not null, return it
      */
     fun parseDnsQuery(session: IHTTPSession): Pair<ByteArray?, Response?> {
-        // Log connection info for debugging
-        val remoteAddr = session.remoteIpAddress
         val uri = session.uri
-        val headers = session.headers
-        if (session.method == Method.POST) {
-        } else if (session.method == Method.GET) {
-        }
         
         // Health check endpoint
         if (uri == "/health" || uri == "/") {
             return Pair(null, NanoHTTPD.newFixedLengthResponse(Status.OK, "text/plain", "HNS Go DoH Server is running"))
         }
         
+        // Serve HTML guide
+        if (uri == "/index.html") {
+            return Pair(null, ServeHtml.serveIndexHtml())
+        }
+        
+        // Serve screenshot images
+        if (uri.startsWith("/screenshot/")) {
+            val filename = uri.substringAfter("/screenshot/")
+            return Pair(null, ServeHtml.serveScreenshot(filename))
+        }
+        
         if (uri != "/dns-query") {
-            return Pair(null, NanoHTTPD.newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found. Use /dns-query for DNS queries or /health for health check."))
+            return Pair(null, NanoHTTPD.newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found. Use /dns-query for DNS queries, /health for health check, or /index.html for installation guide."))
         }
 
         // Handle both GET and POST methods (RFC 8484)
@@ -127,4 +133,5 @@ object RequestParser {
             null
         }
     }
+    
 }

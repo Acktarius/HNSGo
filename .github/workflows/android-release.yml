@@ -67,8 +67,12 @@ jobs:
       - name: Get APK filename and SHA256
         id: apk_info
         run: |
-          APK_FILE=$(find android/app/build/outputs/apk/release -name "app-release.apk" | head -1)
-          APK_NAME="hnsgo-${{ steps.get_version.outputs.VERSION }}.apk"
+          APK_FILE=$(find android/app/build/outputs/apk/release -name "HNSGo-v*.apk" | head -1)
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK file not found!"
+            exit 1
+          fi
+          APK_NAME=$(basename "$APK_FILE")
           APK_SHA256=$(sha256sum "$APK_FILE" | cut -d ' ' -f 1)
           echo "apk_file=$APK_FILE" >> $GITHUB_OUTPUT
           echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
