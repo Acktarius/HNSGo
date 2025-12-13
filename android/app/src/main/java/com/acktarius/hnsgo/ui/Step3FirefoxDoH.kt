@@ -171,7 +171,7 @@ fun Step3FirefoxDoH(
             Spacer(Modifier.height(8.dp))
             
             Text(
-                "3.5 After restarting Firefox, visit this URL to accept the certificate:",
+                "3.5 After restarting Firefox, visit this URL to trigger certificate acceptance",
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = typewriterFont,
                     fontSize = 11.sp
@@ -271,7 +271,7 @@ fun Step3FirefoxDoH(
                 .fillMaxWidth(0.9f)
         ) {
             Text(
-                "This will trigger Firefox to show a certificate warning. Click 'Advanced' → 'Accept the Risk and Continue'.",
+                "Click 'Advanced' → 'Accept the Risk and Continue'.",
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = typewriterFont,
                     fontSize = 11.sp

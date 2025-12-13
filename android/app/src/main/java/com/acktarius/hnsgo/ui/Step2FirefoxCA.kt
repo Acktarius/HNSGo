@@ -33,7 +33,7 @@ fun Step2FirefoxCA(
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            "Step 2: Enable Third-Party CA in Firefox (Required)",
+            "Step 2: Enable Third-Party CA in Firefox",
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontFamily = typewriterFont,
                 fontSize = 14.sp,
@@ -85,7 +85,7 @@ fun Step2FirefoxCA(
             Spacer(Modifier.height(4.dp))
             
             Text(
-                "2.3 Go back to Settings → Enable 'Use third party CA certificates'",
+                "2.3 Go back to Settings → Secret Settings → Enable 'Use third party CA certificates'",
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = typewriterFont,
                     fontSize = 11.sp

@@ -45,7 +45,7 @@ fun Step1Certificate(
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            "Step 1: Install CA Certificate (Required)",
+            "Step 1: Install CA Certificate",
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontFamily = typewriterFont,
                 fontSize = 14.sp,

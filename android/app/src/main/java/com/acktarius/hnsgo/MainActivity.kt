@@ -469,7 +469,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     // Step 2: Enable Third-Party CA in Firefox
                     Step2FirefoxCA(
@@ -478,7 +478,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     // Step 3: Configure Firefox DoH
                     Step3FirefoxDoH(
@@ -489,7 +489,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     // Step 4: Enable Ad Blocking
                     Step4AdBlocking(
@@ -506,7 +506,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     Text(
                         "DANE Inspector",
@@ -536,7 +536,7 @@ fun HnsGoScreen(act: MainActivity) {
                         onValueChange = { daneUrl = it },
                         label = {
                             Text(
-                                "URL (e.g., https://nathan.woodburn/)",
+                                "URL (e.g., https://dweb.conceal/)",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp

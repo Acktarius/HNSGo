@@ -16,6 +16,7 @@ object Bandw {
     private val WHITELIST = setOf(
         "home.conceal",
         "dweb.conceal",
+        "conceal.network",
         "localhost.localdomain",
         "local"
         // Add more whitelisted domains as needed
