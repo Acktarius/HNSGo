@@ -22,12 +22,14 @@ import java.io.ByteArrayInputStream
 import android.util.Log
 import javax.net.ssl.SSLServerSocket
 import com.acktarius.hnsgo.dohservice.RequestParser
+import com.acktarius.hnsgo.dohservice.ServeHtml
 import com.acktarius.hnsgo.dohservice.DnsResolver
 import com.acktarius.hnsgo.dohservice.ResponseBuilder
 import com.acktarius.hnsgo.dohservice.SslContextFactory
 import com.acktarius.hnsgo.dohservice.TestDnsResolution
 import com.acktarius.hnsgo.dohservice.NotificationHelper
 import com.acktarius.hnsgo.dohservice.DoTClientHandler
+import com.acktarius.hnsgo.adblocker.AdBlockManager
 
 class DohService : Service() {
     companion object {
@@ -51,6 +53,9 @@ class DohService : Service() {
                     
                     // Initialize AdBlockManager
                     AdBlockManager.init(this@DohService)
+                    
+                    // Initialize ServeHtml with context for asset access
+                    ServeHtml.init(this@DohService)
                     
                     // Start DoH server
                     val newDohServer = LocalDoHServer()

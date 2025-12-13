@@ -83,11 +83,10 @@ object Config {
     const val HEADER_SYNC_BATCH_SIZE = 100  // Save headers every N headers
     const val HEADER_SYNC_TIMEOUT_SECONDS = 30
     // Matching hnsd: saves checkpoint every HSK_STORE_CHECKPOINT_WINDOW (2000) blocks (chain.c:750)
-    // But we save more frequently for Android (app may close) - every 2000 blocks for checkpoint-style saves
-    const val HEADER_SAVE_FREQUENCY_THRESHOLD = 2000  // Save every N new headers (matching HSK_STORE_CHECKPOINT_WINDOW)
-    const val HEADER_SAVE_CHAIN_INTERVAL = 2000  // Save every N headers in chain (matching HSK_STORE_CHECKPOINT_WINDOW)
+    // hnsd saves when chain->height % HSK_STORE_CHECKPOINT_WINDOW == 0
+    const val HEADER_SAVE_CHECKPOINT_WINDOW = 2000  // HSK_STORE_CHECKPOINT_WINDOW from constants.h (exact match)
     const val CHECKPOINT_HEIGHT = 136000  // Mainnet checkpoint height (from checkpoints.h)
-    const val CHECKPOINT_WINDOW = 2000  // HSK_STORE_CHECKPOINT_WINDOW from constants.h (exact match)
+    const val CHECKPOINT_WINDOW = 2000  // HSK_STORE_CHECKPOINT_WINDOW from constants.h (exact match, same as HEADER_SAVE_CHECKPOINT_WINDOW)
     const val CHECKPOINT_HEADERS_COUNT = 150  // HSK_STORE_HEADERS_COUNT from store.h (exact match)
     const val TREE_INTERVAL = 36  // HSK_TREE_INTERVAL from constants.h
     const val MAX_VALID_HEIGHT = 500000  // Maximum valid blockchain height (sanity check to prevent corrupted data)

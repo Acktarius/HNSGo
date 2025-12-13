@@ -442,23 +442,29 @@ object CertHelper {
      * Tries multiple approaches to open certificate installation page directly
      */
     fun openCertificateInstallSettings(context: Context) {
-        // Prioritize opening the certificate installation settings page directly
-        // This avoids showing alert dialogs and goes straight to where users need to be
+        // Navigate to: Settings -> Security and privacy -> More security & Privacy -> 
+        // Encryption & Credentials -> Install a certificate
+        // Try multiple intents to find the one that works on this device
         val intents = listOf(
-            // Try to open encryption & credentials settings directly (Android 9+)
-            // This is the page where users can install CA certificates
+            // Primary: Try to open encryption & credentials settings directly (Android 9+)
+            // This opens: Settings -> Security -> Encryption & credentials
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                Intent("android.settings.ENCRYPTION_AND_CREDENTIALS")
+                Intent("android.settings.ENCRYPTION_AND_CREDENTIALS").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             } else null,
-            // Try security settings (Android 8 and below)
-            Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS),
-            // Fallback to general settings
-            Intent(android.provider.Settings.ACTION_SETTINGS)
+            // Alternative: Try security settings (Android 8 and below)
+            Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+            // Fallback: General settings (user must navigate manually)
+            Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
         ).filterNotNull()
         
         for (intent in intents) {
             try {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (intent.resolveActivity(context.packageManager) != null) {
                     context.startActivity(intent)
                     return

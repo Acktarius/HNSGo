@@ -7,6 +7,7 @@ import com.acktarius.hnsgo.spvp2p.MessageHandler
 import com.acktarius.hnsgo.spvp2p.ProtocolHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.Collections
 import java.util.Arrays
@@ -90,6 +91,18 @@ object HeaderSync {
         }
         
         val locatorHashes = ChainLocator.buildLocatorList(headerChainSnapshot, startHeight, firstInMemoryHeight)
+        val locatorHeightRange = if (locatorHashes.size > 1) {
+            val minHeight = maxOf(firstInMemoryHeight, startHeight - (locatorHashes.size - 1) * 2) // Approximate
+            "$minHeight-$startHeight"
+        } else {
+            "$startHeight"
+        }
+        android.util.Log.d("HNSGo", "HeaderSync: Built locator with ${locatorHashes.size} hashes from height $startHeight (firstInMemory: $firstInMemoryHeight, chainSize: ${headerChainSnapshot.size}, heightRange: ~$locatorHeightRange)")
+        if (locatorHashes.isNotEmpty()) {
+            val firstHashHex = locatorHashes.first().take(16).joinToString("") { "%02x".format(it) }
+            val lastHashHex = if (locatorHashes.size > 1) locatorHashes.last().take(16).joinToString("") { "%02x".format(it) } else "N/A"
+            android.util.Log.d("HNSGo", "HeaderSync: Locator first hash (tip): $firstHashHex..., last hash: $lastHashHex...")
+        }
         
         val checkpointEndHeight = Config.CHECKPOINT_HEIGHT + 150 - 1
         if (startHeight <= checkpointEndHeight) {
@@ -101,9 +114,13 @@ object HeaderSync {
         // This ensures each header in a batch sees the correct expected height
         var localCurrentHeight = startHeight
         
+        val syncStartTime = System.currentTimeMillis()
+        android.util.Log.d("HNSGo", "HeaderSync: Starting sync from height $startHeight (network height: $knownNetworkHeight)")
+        
         val syncResult = ConnectionManager.syncHeaders(
             startHeight, locatorHashes,
             { header, preComputedHash ->
+                val headerProcessStartTime = System.currentTimeMillis()
                 // CRITICAL: Only accept headers that connect to our tip (new headers)
                 // When using earlier locator hashes, peers send headers starting from those points
                 // We need to reject headers that don't connect to our tip (they're old headers)
@@ -115,6 +132,7 @@ object HeaderSync {
                 // 2. Skip headers that are before our tip (old headers)
                 // 3. Only accept headers that connect to our tip (new headers after our tip)
                 
+                val tipCheckStartTime = System.currentTimeMillis()
                 val tipInfo = synchronized(headerChain) {
                     if (headerChain.isEmpty()) {
                         Triple(false, false, null as ByteArray?)
@@ -126,6 +144,7 @@ object HeaderSync {
                         Triple(isCurrentTip, connectsToTip, tipHash)
                     }
                 }
+                val tipCheckDuration = System.currentTimeMillis() - tipCheckStartTime
                 
                 val (isCurrentTip, connectsToTip, tipHash) = tipInfo
                 
@@ -147,38 +166,68 @@ object HeaderSync {
                         false  // Reject but continue processing batch
                     } else {
                         // Second check: validate the header (duplicate check, etc.)
-                        if (validateHeader(header, preComputedHash, headerChain, expectedHeight)) {
+                        val validateStartTime = System.currentTimeMillis()
+                        val isValid = validateHeader(header, preComputedHash, headerChain, expectedHeight)
+                        val validateDuration = System.currentTimeMillis() - validateStartTime
+                        
+                        if (isValid) {
+                            val addStartTime = System.currentTimeMillis()
                             headerChain.add(header)
                             newHeadersCount++
                             localCurrentHeight++  // Update local tracker immediately
                         
-                        // Add to HashSet for O(1) duplicate detection
-                        synchronized(headerHashes) {
-                            headerHashes.add(HashWrapper(preComputedHash))
-                        }
-                        
-                        synchronized(headerChain) {
-                            if (headerChain.size > maxInMemoryHeaders) {
-                                val removeCount = headerChain.size - maxInMemoryHeaders
-                                // Remove old headers from HashSet when trimming
-                                synchronized(headerHashes) {
+                            // Add to HashSet for O(1) duplicate detection
+                            synchronized(headerHashes) {
+                                headerHashes.add(HashWrapper(preComputedHash))
+                            }
+                            
+                            synchronized(headerChain) {
+                                if (headerChain.size > maxInMemoryHeaders) {
+                                    val trimStartTime = System.currentTimeMillis()
+                                    val removeCount = headerChain.size - maxInMemoryHeaders
+                                    // Remove old headers from HashSet when trimming
+                                    synchronized(headerHashes) {
+                                        for (i in 0 until removeCount) {
+                                            val removedHeader = headerChain[i]
+                                            headerHashes.remove(HashWrapper(removedHeader.hash()))
+                                        }
+                                    }
                                     for (i in 0 until removeCount) {
-                                        val removedHeader = headerChain[i]
-                                        headerHashes.remove(HashWrapper(removedHeader.hash()))
+                                        headerChain.removeAt(0)
+                                    }
+                                    // Calculate new firstInMemoryHeight after trimming
+                                    val newFirstInMemory = localCurrentHeight - headerChain.size + 1
+                                    val trimDuration = System.currentTimeMillis() - trimStartTime
+                                    if (trimDuration > 10) {
+                                        android.util.Log.d("HNSGo", "HeaderSync: Trimmed $removeCount headers in ${trimDuration}ms")
                                     }
                                 }
-                                for (i in 0 until removeCount) {
-                                    headerChain.removeAt(0)
-                                }
-                                // Calculate new firstInMemoryHeight after trimming
-                                val newFirstInMemory = localCurrentHeight - headerChain.size + 1
                             }
-                        }
-                        
+                            
+                            val addDuration = System.currentTimeMillis() - addStartTime
                             onHeaderAdded(header, expectedHeight)  // Update SpvClient's chainHeight with actual height
+                            
+                            val totalProcessDuration = System.currentTimeMillis() - headerProcessStartTime
+                            if (totalProcessDuration > 5 || validateDuration > 3) {
+                                android.util.Log.v("HNSGo", "HeaderSync: Header $expectedHeight processed in ${totalProcessDuration}ms " +
+                                    "(tip check: ${tipCheckDuration}ms, validate: ${validateDuration}ms, add: ${addDuration}ms)")
+                            }
+                            
                             true
                         } else {
-                            android.util.Log.w("HNSGo", "HeaderSync: Invalid header at height $expectedHeight")
+                            // Log why header was rejected for debugging
+                            val lastHeader = synchronized(headerChain) { headerChain.lastOrNull() }
+                            val lastHash = lastHeader?.hash()
+                            val isChainMismatch = lastHash != null && !header.prevBlock.contentEquals(lastHash)
+                            val isDuplicate = synchronized(headerHashes) { 
+                                headerHashes.contains(HashWrapper(preComputedHash)) 
+                            }
+                            val reason = when {
+                                isChainMismatch -> "chain connection failure (prevBlock mismatch)"
+                                isDuplicate -> "duplicate (already in chain)"
+                                else -> "unknown validation failure"
+                            }
+                            android.util.Log.w("HNSGo", "HeaderSync: Invalid header at height $expectedHeight - $reason (validation took ${validateDuration}ms)")
                             false
                         }
                     }
@@ -186,26 +235,37 @@ object HeaderSync {
             },
             MessageHandler, ProtocolHandler
         )
+        val syncDuration = System.currentTimeMillis() - syncStartTime
         
         val networkHeightFromSync = syncResult.networkHeight
         val finalHeight = getChainHeight()
+        
+        android.util.Log.i("HNSGo", "HeaderSync: Sync completed in ${syncDuration}ms - " +
+            "Height: $startHeight -> $finalHeight (+$newHeadersCount), " +
+            "Success: ${syncResult.success}, Network height: $networkHeightFromSync")
+        
         if (networkHeightFromSync != null) {
             val behind = networkHeightFromSync - finalHeight
             if (behind > 0) {
+                android.util.Log.d("HNSGo", "HeaderSync: Behind network by $behind blocks")
             } else if (behind < 0) {
+                android.util.Log.d("HNSGo", "HeaderSync: Ahead of network by ${-behind} blocks")
             } else {
+                android.util.Log.d("HNSGo", "HeaderSync: At network height")
             }
         }
         
         when {
             syncResult.success && newHeadersCount > 0 -> {
-                // IMPROVED SAVE FREQUENCY: Save more regularly to preserve progress
-                // Save every N new headers during active sync, or every N headers in chain
-                // This ensures progress is saved even if app is closed
-                val shouldSave = newHeadersCount >= Config.HEADER_SAVE_FREQUENCY_THRESHOLD || 
-                                 headerChain.size % Config.HEADER_SAVE_CHAIN_INTERVAL == 0
+                // MATCHING hnsd: Save when chain height is a multiple of CHECKPOINT_WINDOW (chain.c:750)
+                // hnsd: if (chain->height % HSK_STORE_CHECKPOINT_WINDOW == 0) hsk_chain_checkpoint_flush(chain)
+                val currentHeight = getChainHeight()
+                val shouldSave = currentHeight % Config.HEADER_SAVE_CHECKPOINT_WINDOW == 0
                 if (shouldSave) {
+                    val saveStartTime = System.currentTimeMillis()
                     saveHeaders()
+                    val saveDuration = System.currentTimeMillis() - saveStartTime
+                    android.util.Log.d("HNSGo", "HeaderSync: Saved headers at height $currentHeight in ${saveDuration}ms")
                 }
             }
             !syncResult.success -> {
@@ -213,6 +273,7 @@ object HeaderSync {
                 android.util.Log.w("HNSGo", "HeaderSync: This is normal if peers have pruned old headers")
             }
             else -> {
+                android.util.Log.d("HNSGo", "HeaderSync: Sync succeeded but no new headers received")
             }
         }
         
@@ -231,17 +292,28 @@ object HeaderSync {
         var networkHeight: Int? = null
         val maxIterations = 1000
         var iteration = 0
+        val syncStartTime = System.currentTimeMillis()
+        
+        android.util.Log.i("HNSGo", "HeaderSync: Starting background sync loop")
         
         while (iteration < maxIterations) {
+            // Check if coroutine was cancelled (e.g., user turned off toggle)
+            ensureActive()
             iteration++
+            val iterationStartTime = System.currentTimeMillis()
             val heightBeforeSync = getChainHeight()
             
+            android.util.Log.d("HNSGo", "HeaderSync: Iteration $iteration - Current height: $heightBeforeSync, Network height: $networkHeight")
+            
+            val syncCallStartTime = System.currentTimeMillis()
             val syncResult = syncHeaders()
+            val syncCallDuration = System.currentTimeMillis() - syncCallStartTime
             networkHeight = syncResult ?: networkHeight
             
             val currentHeight = getChainHeight()
             val headersReceived = currentHeight > heightBeforeSync
             val newHeadersCount = currentHeight - heightBeforeSync
+            val iterationDuration = System.currentTimeMillis() - iterationStartTime
             
             if (networkHeight != null) {
                 val behind = networkHeight - currentHeight
@@ -249,36 +321,58 @@ object HeaderSync {
                 // Allow 2 blocks ahead to account for network propagation delays (peer might report slightly stale height)
                 val isCaughtUp = behind >= -2 && behind <= 10
                 
+                android.util.Log.i("HNSGo", "HeaderSync: Iteration $iteration completed in ${iterationDuration}ms - " +
+                    "Height: $heightBeforeSync -> $currentHeight (+$newHeadersCount), " +
+                    "Network: $networkHeight (behind: $behind), " +
+                    "Sync call: ${syncCallDuration}ms")
+                
                 if (isCaughtUp) {
                     if (behind < 0) {
+                        android.util.Log.i("HNSGo", "HeaderSync: Caught up! (ahead by ${-behind} blocks)")
                     } else {
+                        android.util.Log.i("HNSGo", "HeaderSync: Caught up! (behind by $behind blocks)")
                     }
                     break
                 }
                 if (headersReceived) {
+                    android.util.Log.d("HNSGo", "HeaderSync: Received $newHeadersCount headers, continuing sync (behind: $behind)")
                 } else {
+                    android.util.Log.d("HNSGo", "HeaderSync: No new headers received (behind: $behind)")
                 }
             } else {
                 if (headersReceived) {
+                    android.util.Log.d("HNSGo", "HeaderSync: Received $newHeadersCount headers, network height unknown")
                 } else {
+                    android.util.Log.d("HNSGo", "HeaderSync: No headers received, network height unknown (iteration $iteration)")
                     if (iteration >= 5) {
+                        android.util.Log.w("HNSGo", "HeaderSync: No headers received after 5 iterations, stopping")
                         break
                     }
                 }
             }
             
             val isSynced = networkHeight != null && (networkHeight - currentHeight) <= 10
-            if (isSynced && !headersReceived && iteration > 1) {
-                delay(5 * 60 * 1000L)
+            val delayMs = if (isSynced && !headersReceived && iteration > 1) {
+                5 * 60 * 1000L
             } else if (!headersReceived) {
-                delay(2000)
+                2000L
             } else {
-                delay(500)
+                500L
             }
+            
+            if (delayMs > 1000) {
+                android.util.Log.d("HNSGo", "HeaderSync: Delaying ${delayMs}ms before next iteration")
+            }
+            // Check for cancellation before delay
+            ensureActive()
+            delay(delayMs)
         }
         
+        val totalSyncDuration = System.currentTimeMillis() - syncStartTime
         if (iteration >= maxIterations) {
-            android.util.Log.w("HNSGo", "HeaderSync: Background sync reached max iterations ($maxIterations), stopping")
+            android.util.Log.w("HNSGo", "HeaderSync: Background sync reached max iterations ($maxIterations) after ${totalSyncDuration}ms, stopping")
+        } else {
+            android.util.Log.i("HNSGo", "HeaderSync: Background sync completed after $iteration iterations in ${totalSyncDuration}ms")
         }
         
         return@withContext networkHeight
