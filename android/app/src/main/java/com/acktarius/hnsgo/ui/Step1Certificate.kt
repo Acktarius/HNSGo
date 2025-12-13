@@ -220,16 +220,15 @@ fun Step1Certificate(
             )
         }
     } else {
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         
         Text(
             "✓ CA Certificate is installed",
-            style = MaterialTheme.typography.bodyMedium.copy(
+            style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = typewriterFont,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 10.sp
             ),
-            color = MaterialTheme.colorScheme.primary
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
         )
     }
 }
