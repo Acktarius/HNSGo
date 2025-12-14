@@ -3,6 +3,7 @@ package com.acktarius.hnsgo
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.acktarius.hnsgo.SpvClient
 import org.xbill.DNS.Name
 import org.xbill.DNS.Record
 import org.xbill.DNS.ARecord
@@ -177,7 +178,8 @@ object DaneVerifier {
             val tlsaClass = DClass.IN
             
             // Step 1: Check cache first
-            val cached = CacheManager.get(tlsaName, tlsaType, tlsaClass)
+            val currentHeight = SpvClient.getChainHeight()
+            val cached = CacheManager.get(tlsaName, tlsaType, tlsaClass, currentHeight)
             if (cached != null) {
                 try {
                     val cachedMessage = Message(cached)
@@ -205,7 +207,8 @@ object DaneVerifier {
             if (tlsaRecords.isNotEmpty()) {
                 val ttl = answers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
                 val wireData = dnsMessage.toWire()
-                CacheManager.put(tlsaName, tlsaType, tlsaClass, wireData, ttl)
+                val currentHeight = SpvClient.getChainHeight()
+                CacheManager.put(tlsaName, tlsaType, tlsaClass, wireData, ttl, currentHeight)
                 
                 // Log TLSA records for debugging
                 Log.d("DaneVerifier", "Found ${tlsaRecords.size} TLSA record(s) for $tlsaName:")

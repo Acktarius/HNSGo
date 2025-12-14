@@ -1,13 +1,17 @@
 package com.acktarius.hnsgo.spvclient
 
+import com.acktarius.hnsgo.CacheManager
 import com.acktarius.hnsgo.Config
 import com.acktarius.hnsgo.Header
+import com.acktarius.hnsgo.dohservice.DnsResolver
 import com.acktarius.hnsgo.spvp2p.ConnectionManager
 import com.acktarius.hnsgo.spvp2p.MessageHandler
 import com.acktarius.hnsgo.spvp2p.ProtocolHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Collections
 import java.util.Arrays
@@ -293,6 +297,7 @@ object HeaderSync {
         val maxIterations = 1000
         var iteration = 0
         val syncStartTime = System.currentTimeMillis()
+        var lastCacheCleanupHeight = getChainHeight()
         
         android.util.Log.i("HNSGo", "HeaderSync: Starting background sync loop")
         
@@ -314,6 +319,24 @@ object HeaderSync {
             val headersReceived = currentHeight > heightBeforeSync
             val newHeadersCount = currentHeight - heightBeforeSync
             val iterationDuration = System.currentTimeMillis() - iterationStartTime
+            
+            // Check if we've advanced 36 blocks since last cache cleanup
+            val blocksSinceCleanup = currentHeight - lastCacheCleanupHeight
+            if (blocksSinceCleanup >= Config.TREE_INTERVAL) {
+                // Run cache cleanup every 36 blocks (async, non-blocking)
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        CacheManager.cleanupExpiredEntries(currentHeight) { name, type, dclass ->
+                            // Prefetch callback: resolve the name to refresh cache
+                            // Use DnsResolver to trigger resolution (will update cache)
+                            DnsResolver.resolve(name, type, dclass, 0, null)
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("HNSGo", "HeaderSync: Cache cleanup failed: ${e.message}")
+                    }
+                }
+                lastCacheCleanupHeight = currentHeight
+            }
             
             if (networkHeight != null) {
                 val behind = networkHeight - currentHeight

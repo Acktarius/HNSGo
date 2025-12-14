@@ -5,6 +5,7 @@ import com.acktarius.hnsgo.adblocker.AdBlockManager
 import com.acktarius.hnsgo.CacheManager
 import com.acktarius.hnsgo.Config
 import com.acktarius.hnsgo.RecursiveResolver
+import com.acktarius.hnsgo.SpvClient
 import com.acktarius.hnsgo.Tld
 import org.xbill.DNS.DClass
 import org.xbill.DNS.Type
@@ -42,9 +43,10 @@ object DnsResolver {
         queryId: Int,
         originalQuestion: org.xbill.DNS.Record?
     ): ResolutionResult {
+        val currentHeight = SpvClient.getChainHeight()
 
         // Priority 1: Check cache FIRST (for both allowed and blocked outcomes)
-        val cached = CacheManager.get(name, type, dclass)
+        val cached = CacheManager.get(name, type, dclass, currentHeight)
         if (cached != null) {
             // Validate cached response has content
             try {
@@ -86,7 +88,7 @@ object DnsResolver {
                 }
                 val blockedWireData = blockedMsg.toWire()
                 // Cache blocked domain response (NXDOMAIN) with short TTL
-                CacheManager.put(name, type, dclass, blockedWireData, 60)
+                CacheManager.put(name, type, dclass, blockedWireData, 60, SpvClient.getChainHeight())
                 return ResolutionResult.Blocked(blockedMsg)
             }
             AdBlockManager.BlockResult.Blocked -> {
@@ -100,7 +102,7 @@ object DnsResolver {
                 }
                 val blockedWireData = blockedMsg.toWire()
                 // Cache blocked domain response (NXDOMAIN) with short TTL
-                CacheManager.put(name, type, dclass, blockedWireData, 60)
+                CacheManager.put(name, type, dclass, blockedWireData, 60, SpvClient.getChainHeight())
                 return ResolutionResult.Blocked(blockedMsg)
             }
             AdBlockManager.BlockResult.Allowed -> {
@@ -124,8 +126,9 @@ object DnsResolver {
         queryId: Int
     ): ResolutionResult {
         return try {
+            val currentHeight = SpvClient.getChainHeight()
             // Check cache first
-            val cached = CacheManager.get(name, type, dclass)
+            val cached = CacheManager.get(name, type, dclass, currentHeight)
             if (cached != null) {
                 return ResolutionResult.Cached(cached)
             }
@@ -170,7 +173,7 @@ object DnsResolver {
                     if (systemRcode == Rcode.NOERROR && systemAnswers.isNotEmpty()) {
                         val ttl = systemAnswers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
                         val wireData = systemResponse.toWire()
-                        CacheManager.put(name, type, dclass, wireData, ttl)
+                        CacheManager.put(name, type, dclass, wireData, ttl, SpvClient.getChainHeight())
                     }
                     ResolutionResult.Success(systemResponse)
                 } catch (e: Exception) {
@@ -188,7 +191,7 @@ object DnsResolver {
                     Config.DNS_CACHE_TTL_SECONDS
                 }
                 val wireData = response.toWire()
-                CacheManager.put(name, type, dclass, wireData, ttl)
+                CacheManager.put(name, type, dclass, wireData, ttl, SpvClient.getChainHeight())
             } else {
             }
             
@@ -205,6 +208,7 @@ object DnsResolver {
         queryId: Int,
         originalQuestion: org.xbill.DNS.Record?
     ): ResolutionResult {
+        val currentHeight = SpvClient.getChainHeight()
         // Try Handshake recursive resolution (with timeout to avoid hanging)
         val response = try {
             runBlocking { 
@@ -226,7 +230,7 @@ object DnsResolver {
                 Config.DNS_CACHE_TTL_SECONDS
             }
             val wireData = response.toWire()
-            CacheManager.put(name, type, dclass, wireData, ttl)
+            CacheManager.put(name, type, dclass, wireData, ttl, currentHeight)
             
             return ResolutionResult.Success(response)
         }
@@ -240,13 +244,14 @@ object DnsResolver {
      * Forward DNS query to upstream resolver (Quad9)
      */
     fun forwardToDns(query: Message, name: String?): Message {
+        val currentHeight = SpvClient.getChainHeight()
         val questions = query.getSection(Section.QUESTION)
         val domainName = name ?: (if (questions.isNotEmpty()) questions[0].name.toString() else "unknown")
         val queryType = if (questions.isNotEmpty()) questions[0].type else Type.A
         val queryClass = DClass.IN
         
         // Check cache first
-        val cached = CacheManager.get(domainName, queryType, queryClass)
+        val cached = CacheManager.get(domainName, queryType, queryClass, currentHeight)
         if (cached != null) {
             return Message(cached)
         }
@@ -268,7 +273,7 @@ object DnsResolver {
         }
         
         val wireData = response.toWire()
-        CacheManager.put(domainName, queryType, queryClass, wireData, ttl)
+        CacheManager.put(domainName, queryType, queryClass, wireData, ttl, currentHeight)
         
         return response
     }

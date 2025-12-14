@@ -49,7 +49,7 @@ object NameResolver {
         }
         
         // Use (qname, qtype, qclass) as cache key - for TLD proof cache, use DClass.IN
-        val cached = CacheManager.get(tld, 1, org.xbill.DNS.DClass.IN)
+        val cached = CacheManager.get(tld, 1, org.xbill.DNS.DClass.IN, chainHeight)
         if (cached != null) {
             // Parse cached Handshake records and convert to DNS format (matching fresh query behavior)
             val cachedHandshakeRecords = parseRecords(cached)
@@ -68,7 +68,7 @@ object NameResolver {
                 if (dnsRecords.isNotEmpty()) {
                     val proofData = convertRecordsToProof(blockchainRecords, tld)
                     // Use (qname, qtype, qclass) as cache key - for TLD proof cache, use DClass.IN
-                    CacheManager.put(tld, 1, org.xbill.DNS.DClass.IN, proofData, Config.DNS_CACHE_TTL_SECONDS)
+                    CacheManager.put(tld, 1, org.xbill.DNS.DClass.IN, proofData, Config.DNS_CACHE_TTL_SECONDS, chainHeight)
                     return@withContext dnsRecords
                 }
             }
