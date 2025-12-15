@@ -194,9 +194,7 @@ fun HnsGoScreen(act: MainActivity) {
         
         // Check if Firefox is installed
         firefoxAvailable = FirefoxUtils.isFirefoxInstalled(act)
-        Log.d("MainActivity", "Firefox detection: firefoxAvailable = $firefoxAvailable")
         val firefoxPackage = FirefoxUtils.getFirefoxPackageName(act)
-        Log.d("MainActivity", "Firefox package: $firefoxPackage")
     }
     
     // Listen for debug query results from DohService
@@ -353,7 +351,6 @@ fun HnsGoScreen(act: MainActivity) {
                 // 3. Save headers to preserve progress
                 try {
                     SpvClient.forceSaveHeaders()
-                    android.util.Log.d("HNSGo", "MainActivity: Headers saved successfully on stop")
                 } catch (e: Exception) {
                     android.util.Log.w("HNSGo", "MainActivity: Failed to save headers on stop", e)
                 }

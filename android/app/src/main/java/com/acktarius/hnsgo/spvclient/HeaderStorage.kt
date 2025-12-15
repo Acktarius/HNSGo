@@ -126,10 +126,8 @@ object HeaderStorage {
             
             val newHeadersCount = chainHeight - lastSavedHeight
             if (!force && newHeadersCount <= 0) {
-                android.util.Log.d("HNSGo", "HeaderStorage: Skipping save - no new headers (chainHeight=$chainHeight, lastSavedHeight=$lastSavedHeight)")
                 return@withContext false
             }
-            android.util.Log.d("HNSGo", "HeaderStorage: Saving headers - chainHeight=$chainHeight, lastSavedHeight=$lastSavedHeight, newHeaders=$newHeadersCount, force=$force")
             
             // MATCHING hnsd: Only save the latest 150 headers (HSK_STORE_HEADERS_COUNT)
             // This prevents OOM and matches hnsd's behavior - SPV clients don't need all historical headers
@@ -172,7 +170,6 @@ object HeaderStorage {
                     incrementalFile.delete()
                 }
                 
-                android.util.Log.d("HNSGo", "HeaderStorage: Successfully saved headers at height $chainHeight")
                 return@withContext true
             }
         } catch (e: OutOfMemoryError) {

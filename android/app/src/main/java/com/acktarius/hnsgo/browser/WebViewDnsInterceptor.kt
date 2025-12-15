@@ -67,16 +67,13 @@ class WebViewDnsInterceptor {
      */
     private val dohDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            Log.d(TAG, "OkHttp DNS lookup for: $hostname")
             
             val addresses = resolveThroughDoH(hostname)
             
             if (addresses.isEmpty()) {
-                Log.w(TAG, "DoH returned no addresses for $hostname, falling back to system DNS")
                 return Dns.SYSTEM.lookup(hostname)
             }
             
-            Log.d(TAG, "DoH resolved $hostname -> ${addresses.map { it.hostAddress }}")
             return addresses
         }
     }
@@ -144,7 +141,6 @@ class WebViewDnsInterceptor {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to intercept request for $host: ${e.message}", e)
             createErrorResponse(e)
         }
     }
@@ -159,20 +155,17 @@ class WebViewDnsInterceptor {
         host: String
     ): WebResourceResponse {
         val urlString = uri.toString()
-        Log.d(TAG, "Fetching Handshake site: $urlString")
         
         // Check DANE cache first
         val now = System.currentTimeMillis()
         val cached = daneCache[host]
         val daneResult = if (cached != null && (now - cached.timestamp) < DANE_CACHE_TTL_MS) {
-            Log.d(TAG, "Using cached DANE result for $host")
             cached.result
         } else {
             // Verify DANE and cache the result
             val result = try {
                 DaneVerifier.verify("https://$host/")
             } catch (e: Exception) {
-                Log.e(TAG, "DANE verification failed for $host: ${e.message}")
                 null
             }
             
@@ -185,20 +178,17 @@ class WebViewDnsInterceptor {
         return when {
             // DANE verified - safe to proceed
             daneResult?.isValid == true -> {
-                Log.d(TAG, "DANE verified for $host - proceeding")
                 fetchWithOkHttp(uri, request, handshakeClient)
                     ?: createDaneSuccessPage(host, daneResult)
             }
             
             // TLSA found but doesn't match - dangerous, show warning
             daneResult?.tlsaFound == true && !daneResult.isValid -> {
-                Log.w(TAG, "DANE mismatch for $host - certificate doesn't match TLSA")
                 createDaneMismatchPage(host, daneResult)
             }
             
             // No TLSA record - show proceed anyway option
             else -> {
-                Log.w(TAG, "No TLSA record for $host - showing warning")
                 // Try to fetch anyway with trust-all client
                 val response = try {
                     fetchWithOkHttp(uri, request, handshakeClient)
@@ -220,7 +210,6 @@ class WebViewDnsInterceptor {
         client: OkHttpClient
     ): WebResourceResponse? {
         val urlString = uri.toString()
-        Log.d(TAG, "Fetching via OkHttp: $urlString (method: ${request.method})")
         
         val requestBuilder = Request.Builder()
             .url(urlString)
@@ -253,7 +242,6 @@ class WebViewDnsInterceptor {
             // WebResourceResponse doesn't support 3xx status codes
             // Return null for redirects/304 to let WebView handle them
             if (responseCode in 300..399) {
-                Log.d(TAG, "Response: $responseCode (letting WebView handle)")
                 return@use null
             }
             
@@ -268,7 +256,6 @@ class WebViewDnsInterceptor {
             val body = resp.body
             val bodyBytes = body?.bytes() ?: ByteArray(0)
             
-            Log.d(TAG, "Response: $responseCode, size: ${bodyBytes.size}, type: $mimeType")
             
             WebResourceResponse(
                 mimeType,
@@ -615,10 +602,8 @@ class WebViewDnsInterceptor {
                 return aaaaAddresses
             }
             
-            Log.w(TAG, "No A or AAAA records found for $hostname")
             emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "DoH resolution error for $hostname: ${e.message}")
             emptyList()
         }
     }
@@ -643,11 +628,9 @@ class WebViewDnsInterceptor {
                 extractAddresses(message, hostname)
             }
             is DnsResolver.ResolutionResult.Failure -> {
-                Log.w(TAG, "DoH resolution failed for $hostname (type $recordType): ${response.errorMessage}")
                 emptyList()
             }
             is DnsResolver.ResolutionResult.Blocked -> {
-                Log.d(TAG, "Domain $hostname is blocked by ad blocker")
                 emptyList()
             }
         }
@@ -656,7 +639,6 @@ class WebViewDnsInterceptor {
     private fun extractAddresses(message: Message, hostname: String): List<InetAddress> {
         val rcode = message.header.rcode
         if (rcode != org.xbill.DNS.Rcode.NOERROR) {
-            Log.w(TAG, "DoH response for $hostname has rcode: $rcode")
             return emptyList()
         }
         
@@ -669,19 +651,16 @@ class WebViewDnsInterceptor {
                     try {
                         addresses.add(InetAddress.getByAddress(record.address.address))
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to parse A record: ${e.message}")
                     }
                 }
                 is AAAARecord -> {
                     try {
                         addresses.add(InetAddress.getByAddress(record.address.address))
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to parse AAAA record: ${e.message}")
                     }
                 }
                 is CNAMERecord -> {
                     val cnameTarget = record.target.toString(true).trimEnd('.')
-                    Log.d(TAG, "Following CNAME: $hostname -> $cnameTarget")
                     addresses.addAll(resolveThroughDoH(cnameTarget))
                 }
             }

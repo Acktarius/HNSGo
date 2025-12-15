@@ -211,12 +211,10 @@ object DaneVerifier {
                 CacheManager.put(tlsaName, tlsaType, tlsaClass, wireData, ttl, currentHeight)
                 
                 // Log TLSA records for debugging
-                Log.d("DaneVerifier", "Found ${tlsaRecords.size} TLSA record(s) for $tlsaName:")
                 tlsaRecords.forEachIndexed { index, tlsa ->
                     val parsed = parseTLSA(tlsa)
                     if (parsed != null) {
                         val hashHex = parsed.data.joinToString("") { "%02x".format(it) }
-                        Log.d("DaneVerifier", "  TLSA[$index]: Usage=${parsed.usage}, Selector=${parsed.selector}, MatchType=${parsed.matchingType}, Hash=$hashHex")
                     }
                 }
             }
@@ -237,11 +235,9 @@ object DaneVerifier {
             // Step 1: Resolve hostname to IP address (for Handshake domains, use our resolver)
             val ipAddress = resolveHostToIP(host)
             if (ipAddress == null) {
-                Log.d("DaneVerifier", "Failed to resolve hostname to IP: $host")
                 return@withContext emptyList()
             }
             
-            Log.d("DaneVerifier", "Resolved $host to IP: $ipAddress")
             
             // Create a trust-all manager for fetching certificate (we verify via DANE)
             val trustAllManager = object : X509TrustManager {
@@ -275,9 +271,7 @@ object DaneVerifier {
             socket.close()
             
             if (certChain.isEmpty()) {
-                Log.d("DaneVerifier", "No certificates found in chain for $host")
             } else {
-                Log.d("DaneVerifier", "Found ${certChain.size} certificate(s) in chain for $host")
                 
                 // Log certificate details for debugging
                 certChain.forEachIndexed { index, cert ->
@@ -294,16 +288,11 @@ object DaneVerifier {
                     val certHash = sha256.digest(cert.encoded)
                     val certFingerprint = certHash.joinToString("") { "%02x".format(it) }
                     
-                    Log.d("DaneVerifier", "  Cert[$index]: Subject=$subject")
-                    Log.d("DaneVerifier", "  Cert[$index]: Issuer=$issuer")
-                    Log.d("DaneVerifier", "  Cert[$index]: SPKI SHA-256=$spkiFingerprint")
-                    Log.d("DaneVerifier", "  Cert[$index]: Full Cert SHA-256=$certFingerprint")
                 }
             }
             
             return@withContext certChain
         } catch (e: Exception) {
-            Log.e("DaneVerifier", "Error fetching certificate chain for $host:$port", e)
             emptyList()
         }
     }
@@ -327,7 +316,6 @@ object DaneVerifier {
                     val aRecords = answers.filterIsInstance<ARecord>()
                     if (aRecords.isNotEmpty()) {
                         val ip = aRecords[0].address.hostAddress
-                        Log.d("DaneVerifier", "Resolved $host -> $ip (from cache)")
                         return@withContext ip
                     }
                 } catch (e: Exception) {
@@ -348,7 +336,6 @@ object DaneVerifier {
                     val ttl = answers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
                     CacheManager.put(host, aType, aClass, dnsMessage.toWire(), ttl, currentHeight)
                     
-                    Log.d("DaneVerifier", "Resolved $host -> $ip (from blockchain, cached)")
                     return@withContext ip
                 }
             }
@@ -391,7 +378,6 @@ object DaneVerifier {
         tlsaRecords: List<TLSARecord>
     ): MatchResult {
         if (certChain.isEmpty() || tlsaRecords.isEmpty()) {
-            Log.d("DaneVerifier", "verifyCertificateChainMatchesTLSA: Empty chain or records")
             return MatchResult(false, null)
         }
         
@@ -401,12 +387,10 @@ object DaneVerifier {
         for ((index, tlsa) in tlsaRecords.withIndex()) {
             val parsed = parseTLSA(tlsa)
             if (parsed == null) {
-                Log.d("DaneVerifier", "verifyCertificateChainMatchesTLSA: Failed to parse TLSA[$index]")
                 continue
             }
             
             val tlsaHashHex = parsed.data.joinToString("") { "%02x".format(it) }
-            Log.d("DaneVerifier", "Checking TLSA[$index]: Usage=${parsed.usage}, Selector=${parsed.selector}, MatchType=${parsed.matchingType}, ExpectedHash=$tlsaHashHex")
             
             // Determine which certificate to check based on usage
             val certToCheck = when (parsed.usage) {
@@ -420,13 +404,11 @@ object DaneVerifier {
                 }
                 else -> {
                     // Unsupported usage
-                    Log.d("DaneVerifier", "TLSA[$index]: Unsupported usage ${parsed.usage}")
                     continue
                 }
             }
             
             if (certToCheck == null) {
-                Log.d("DaneVerifier", "TLSA[$index]: No certificate found for usage ${parsed.usage}")
                 continue
             }
             
@@ -435,7 +417,6 @@ object DaneVerifier {
                 0 -> certToCheck.encoded  // Full certificate
                 1 -> certToCheck.publicKey.encoded  // SubjectPublicKeyInfo
                 else -> {
-                    Log.d("DaneVerifier", "TLSA[$index]: Unsupported selector ${parsed.selector}")
                     continue
                 }
             }
@@ -446,19 +427,15 @@ object DaneVerifier {
                 1 -> sha256.digest(certData)  // SHA-256
                 2 -> MessageDigest.getInstance("SHA-512").digest(certData)  // SHA-512
                 else -> {
-                    Log.d("DaneVerifier", "TLSA[$index]: Unsupported matchType ${parsed.matchingType}")
                     continue
                 }
             }
             val certHashHex = certHash.joinToString("") { "%02x".format(it) }
-            Log.d("DaneVerifier", "TLSA[$index]: CertHash=$certHashHex")
             
             // Verify match
             val matches = verifyCertificateMatchesTLSA(certToCheck, parsed)
-            Log.d("DaneVerifier", "TLSA[$index]: Match=${matches}")
             
             if (matches) {
-                Log.d("DaneVerifier", "✓ TLSA[$index] MATCHED!")
                 return MatchResult(
                     true,
                     VerificationResult.MatchedTLSA(
@@ -471,7 +448,6 @@ object DaneVerifier {
             }
         }
         
-        Log.d("DaneVerifier", "No TLSA records matched")
         return MatchResult(false, null)
     }
     

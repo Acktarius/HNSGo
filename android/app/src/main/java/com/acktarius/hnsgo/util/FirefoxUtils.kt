@@ -83,7 +83,6 @@ object FirefoxUtils {
                 return anyMozilla
             }
         } catch (e: Exception) {
-            Log.w("FirefoxUtils", "Error during intent resolution", e)
         }
         
         return null

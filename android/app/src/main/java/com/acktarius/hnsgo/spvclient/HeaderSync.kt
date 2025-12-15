@@ -134,7 +134,6 @@ object HeaderSync {
             
             // Log if there's a mismatch between getChainHeight() and actual tip
             if (actualTipHeight != startHeight) {
-                android.util.Log.w("HNSGo", "HeaderSync: Chain height mismatch - getChainHeight()=$startHeight, actual tip=$actualTipHeight (chainSize=${headerChainSnapshot.size}, firstInMemory=$firstInMemoryHeight)")
             }
         }
         
@@ -146,11 +145,9 @@ object HeaderSync {
         } else {
             "$actualTipHeight"
         }
-        android.util.Log.d("HNSGo", "HeaderSync: Built locator with ${locatorHashes.size} hashes from height $actualTipHeight (getChainHeight=$startHeight, firstInMemory: $firstInMemoryHeight, chainSize: ${headerChainSnapshot.size}, heightRange: ~$locatorHeightRange)")
         if (locatorHashes.isNotEmpty()) {
             val firstHashHex = locatorHashes.first().take(16).joinToString("") { "%02x".format(it) }
             val lastHashHex = if (locatorHashes.size > 1) locatorHashes.last().take(16).joinToString("") { "%02x".format(it) } else "N/A"
-            android.util.Log.d("HNSGo", "HeaderSync: Locator first hash (tip): $firstHashHex..., last hash: $lastHashHex...")
         }
         
         val checkpointEndHeight = Config.CHECKPOINT_HEIGHT + 150 - 1
@@ -166,7 +163,6 @@ object HeaderSync {
         var localCurrentHeight = actualTipHeight
         
         val syncStartTime = System.currentTimeMillis()
-        android.util.Log.d("HNSGo", "HeaderSync: Starting sync from height $actualTipHeight (getChainHeight=$startHeight, network height: $knownNetworkHeight)")
         
         // Update getheaders time when we send getheaders (matching hnsd pool.c:1299)
         lastGetHeadersTime = System.currentTimeMillis()
@@ -251,7 +247,6 @@ object HeaderSync {
                         isAtTip -> "at tip (near-tip duplicate)"
                         else -> "unknown"
                     }
-                    android.util.Log.d("HNSGo", "HeaderSync: Duplicate at height $expectedHeight ($duplicateType) - chainBestHeight=$chainBestHeight (hash=$chainBestHashHex...), localCurrentHeight=$localCurrentHeight, headerHash=$headerHashHex...")
                     
                     // This duplicate is already in our chain at this height - we're already at this height
                     // Advance localCurrentHeight to reflect this
@@ -268,7 +263,6 @@ object HeaderSync {
                         }
                     } else {
                         // Already at this height - this is fine, just continue
-                        android.util.Log.d("HNSGo", "HeaderSync: Duplicate header at height $expectedHeight is in chain - already at this height, continuing")
                     }
                     // Return true so it counts as valid (progress, not an error)
                     // This allows the batch to continue processing and marks it as having valid headers
@@ -314,7 +308,6 @@ object HeaderSync {
                         // Fall through to process it, but we'll skip the tip connection check
                     } else {
                         // Not the next header - might be an old side chain header
-                        android.util.Log.d("HNSGo", "HeaderSync: Header at height $expectedHeight is on different branch but not next header - allowing processing anyway")
                     }
                     // Continue to process it (will skip tip check if it's the next header)
                 } else {
@@ -351,7 +344,6 @@ object HeaderSync {
                         // Skip it - there might be new headers later in the batch
                         if (expectedHeight <= localCurrentHeight + 5) {
                             val prevBlockHex = header.prevBlock.joinToString("") { "%02x".format(it) }.take(16)
-                            android.util.Log.d("HNSGo", "HeaderSync: Header at height $expectedHeight rejected - doesn't connect to tip (prevBlock: $prevBlockHex...)")
                         }
                         false  // Reject but continue processing batch
                     } else {
@@ -484,7 +476,6 @@ object HeaderSync {
                                         val newFirstInMemory = localCurrentHeight - headerChain.size + 1
                                         val trimDuration = System.currentTimeMillis() - trimStartTime
                                         if (trimDuration > 10) {
-                                            android.util.Log.d("HNSGo", "HeaderSync: Trimmed $removeCount headers in ${trimDuration}ms")
                                         }
                                     }
                                 }
@@ -500,12 +491,10 @@ object HeaderSync {
                                 // MATCHING hnsd: Save when chain height is a multiple of CHECKPOINT_WINDOW (chain.c:750)
                                 if (expectedHeight % Config.HEADER_SAVE_CHECKPOINT_WINDOW == 0 && expectedHeight > lastCheckpointSaveHeight) {
                                     lastCheckpointSaveHeight = expectedHeight
-                                    android.util.Log.d("HNSGo", "HeaderSync: Checkpoint boundary reached at height $expectedHeight - triggering save")
                                     // Launch coroutine to call suspend function (we're already in a coroutine context via withContext)
                                     CoroutineScope(Config.HEADER_SYNC_DISPATCHER).launch {
                                         try {
                                             saveHeaders()
-                                            android.util.Log.d("HNSGo", "HeaderSync: Successfully saved checkpoint at height $expectedHeight")
                                         } catch (e: Exception) {
                                             android.util.Log.e("HNSGo", "HeaderSync: Failed to save checkpoint at height $expectedHeight", e)
                                         }
@@ -584,11 +573,8 @@ object HeaderSync {
         if (networkHeightFromSync != null) {
             val behind = networkHeightFromSync - finalHeight
             if (behind > 0) {
-                android.util.Log.d("HNSGo", "HeaderSync: Behind network by $behind blocks")
             } else if (behind < 0) {
-                android.util.Log.d("HNSGo", "HeaderSync: Ahead of network by ${-behind} blocks")
             } else {
-                android.util.Log.d("HNSGo", "HeaderSync: At network height")
             }
         }
         
@@ -597,17 +583,14 @@ object HeaderSync {
         // hnsd: if (chain->height % HSK_STORE_CHECKPOINT_WINDOW == 0) hsk_chain_checkpoint_flush(chain)
         val currentHeight = getChainHeight()
         val shouldSaveCheckpoint = currentHeight % Config.HEADER_SAVE_CHECKPOINT_WINDOW == 0
-        android.util.Log.d("HNSGo", "HeaderSync: End of sync batch - currentHeight=$currentHeight, shouldSaveCheckpoint=$shouldSaveCheckpoint (mod ${Config.HEADER_SAVE_CHECKPOINT_WINDOW} = ${currentHeight % Config.HEADER_SAVE_CHECKPOINT_WINDOW})")
         
         when {
             syncResult.success && newHeadersCount > 0 -> {
                 if (shouldSaveCheckpoint) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Checkpoint save triggered at height $currentHeight (mod ${Config.HEADER_SAVE_CHECKPOINT_WINDOW} == 0)")
                     val saveStartTime = System.currentTimeMillis()
                     try {
                         saveHeaders()
                         val saveDuration = System.currentTimeMillis() - saveStartTime
-                        android.util.Log.d("HNSGo", "HeaderSync: Successfully saved headers at height $currentHeight in ${saveDuration}ms")
                     } catch (e: Exception) {
                         android.util.Log.e("HNSGo", "HeaderSync: Failed to save headers at height $currentHeight", e)
                     }
@@ -615,17 +598,14 @@ object HeaderSync {
                     val nextSaveAt = ((currentHeight / Config.HEADER_SAVE_CHECKPOINT_WINDOW) + 1) * Config.HEADER_SAVE_CHECKPOINT_WINDOW
                     val blocksUntilSave = nextSaveAt - currentHeight
                     if (blocksUntilSave <= 10) {
-                        android.util.Log.d("HNSGo", "HeaderSync: Height $currentHeight, next save at $nextSaveAt (in $blocksUntilSave blocks)")
                     }
                 }
             }
             !syncResult.success -> {
                 // Always check for checkpoint save on failure too
                 if (shouldSaveCheckpoint) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Checkpoint save triggered at height $currentHeight after sync failure (mod ${Config.HEADER_SAVE_CHECKPOINT_WINDOW} == 0)")
                     try {
                         saveHeaders()
-                        android.util.Log.d("HNSGo", "HeaderSync: Successfully saved checkpoint at height $currentHeight after sync failure")
                     } catch (e: Exception) {
                         android.util.Log.e("HNSGo", "HeaderSync: Failed to save checkpoint at height $currentHeight after sync failure", e)
                     }
@@ -640,15 +620,12 @@ object HeaderSync {
             else -> {
                 // Check for checkpoint save even when no new headers received
                 if (shouldSaveCheckpoint) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Checkpoint save triggered at height $currentHeight (no new headers but checkpoint boundary)")
                     try {
                         saveHeaders()
-                        android.util.Log.d("HNSGo", "HeaderSync: Successfully saved checkpoint at height $currentHeight")
                     } catch (e: Exception) {
                         android.util.Log.e("HNSGo", "HeaderSync: Failed to save checkpoint at height $currentHeight", e)
                     }
                 } else {
-                    android.util.Log.d("HNSGo", "HeaderSync: Sync succeeded but no new headers received")
                 }
             }
         }
@@ -685,7 +662,6 @@ object HeaderSync {
             val iterationStartTime = System.currentTimeMillis()
             val heightBeforeSync = getChainHeight()
             
-            android.util.Log.d("HNSGo", "HeaderSync: Iteration $iteration - Current height: $heightBeforeSync, Network height: $networkHeight")
             
             // MATCHING hnsd pool.c:807-811: Periodic getheaders resend if no progress
             // If no block received in 10 minutes, and no getheaders sent in 5 minutes, resend getheaders
@@ -695,7 +671,6 @@ object HeaderSync {
             
             if (blockTime > 0 && now > blockTime + Config.P2P_BLOCK_TIMEOUT_MS) {
                 if (getHeadersTime == 0L || now > getHeadersTime + Config.P2P_GETHEADERS_RESEND_TIMEOUT_MS) {
-                    android.util.Log.w("HNSGo", "HeaderSync: No progress in 10 minutes, resending getheaders (matching hnsd pool.c:807-811)")
                     // Force a resend by updating lastGetHeadersTime - syncHeaders() will be called below
                     // This ensures we resend getheaders to all peers in the next sync attempt
                     lastGetHeadersTime = now
@@ -703,10 +678,8 @@ object HeaderSync {
             }
             
             val syncCallStartTime = System.currentTimeMillis()
-            android.util.Log.d("HNSGo", "HeaderSync: Calling syncHeaders() for iteration $iteration...")
             val syncResult = syncHeaders()
             val syncCallDuration = System.currentTimeMillis() - syncCallStartTime
-            android.util.Log.d("HNSGo", "HeaderSync: syncHeaders() returned after ${syncCallDuration}ms - networkHeight=${syncResult}")
             networkHeight = syncResult ?: networkHeight
             
             val currentHeight = getChainHeight()
@@ -741,7 +714,6 @@ object HeaderSync {
                     // We're still far behind - if we only advanced by 1 and tip hash might not have changed, we might be stuck
                     // Add a small delay every 10 iterations to allow peer rotation
                     if (iteration % 10 == 0) {
-                        android.util.Log.d("HNSGo", "HeaderSync: Still far behind network (${networkHeight - currentHeight} blocks) - adding small delay for peer rotation")
                         delay(500)
                     }
                 }
@@ -759,7 +731,6 @@ object HeaderSync {
                             DnsResolver.resolve(name, type, dclass, 0, null)
                         }
                     } catch (e: Exception) {
-                        android.util.Log.w("HNSGo", "HeaderSync: Cache cleanup failed: ${e.message}")
                     }
                 }
                 lastCacheCleanupHeight = currentHeight
@@ -785,15 +756,11 @@ object HeaderSync {
                     break
                 }
                 if (headersReceived) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Received $newHeadersCount headers, continuing sync (behind: $behind)")
                 } else {
-                    android.util.Log.d("HNSGo", "HeaderSync: No new headers received (behind: $behind)")
                 }
             } else {
                 if (headersReceived) {
-                    android.util.Log.d("HNSGo", "HeaderSync: Received $newHeadersCount headers, network height unknown")
                 } else {
-                    android.util.Log.d("HNSGo", "HeaderSync: No headers received, network height unknown (iteration $iteration)")
                     if (iteration >= 5) {
                         android.util.Log.w("HNSGo", "HeaderSync: No headers received after 5 iterations, stopping")
                         break
@@ -811,7 +778,6 @@ object HeaderSync {
             }
             
             if (delayMs > 1000) {
-                android.util.Log.d("HNSGo", "HeaderSync: Delaying ${delayMs}ms before next iteration")
             }
             // Check for cancellation before delay
             ensureActive()

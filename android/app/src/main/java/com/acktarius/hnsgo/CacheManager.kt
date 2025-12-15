@@ -142,13 +142,11 @@ object CacheManager {
                 try {
                     prefetchCallback(name, type, dclass)
                 } catch (e: Exception) {
-                    android.util.Log.w("HNSGo", "CacheManager: Prefetch failed for $name: ${e.message}")
                 }
             }
         }
         
         if (keysToRemove.isNotEmpty() || keysToPrefetch.isNotEmpty()) {
-            android.util.Log.d("HNSGo", "CacheManager: Cleanup at height $currentHeight - Removed: ${keysToRemove.size}, Prefetching: ${keysToPrefetch.size}")
         }
     }
     
