@@ -136,7 +136,7 @@ object DaneVerifier {
             if (matchResult.isValid) {
                 VerificationResult(
                     isValid = true,
-                    message = "DANE status: ✓ Certificate matches TLSA record. Safe to open in Firefox.\n\nNote: Firefox will show a certificate warning (this is normal for Handshake sites). Click 'Advanced' → 'Accept the Risk' - Firefox will remember your choice.",
+                    message = "DANE status: ✓ Certificate matches TLSA record. Safe to open in Firefox.\n\nNote: Firefox will show a certificate warning, click 'Advanced' → 'Accept the Risk'",
                     tlsaFound = true,
                     certificateFound = true,
                     status = VerificationResult.DANEStatus.DANE_OK,

@@ -31,56 +31,51 @@ fun Step0Mode(
     onSwitchToEasyMode: () -> Unit,
     typewriterFont: FontFamily
 ) {
-    Spacer(Modifier.height(4.dp))
+    Spacer(Modifier.height(8.dp))
     
-    Column(
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left-aligned "Geek mode" text
+        // Left: "Geek Mode"
         Text(
-            "Geek mode ...",
+            "Geek Mode",
             style = MaterialTheme.typography.titleMedium.copy(
                 fontFamily = typewriterFont,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             ),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.fillMaxWidth()
+            color = MaterialTheme.colorScheme.primary
         )
         
-        // Right-aligned "Easy mode" with tiled icon
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.align(Alignment.CenterEnd),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End
-            ) {
-                Text(
-                    "Easy mode ",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = typewriterFont,
-                        fontSize = 14.sp
-                    ),
-                    color = androidx.compose.ui.graphics.Color(0xFF757575) // Grey
+        // Center: Double arrow icon
+        Box(
+            modifier = Modifier
+                .border(
+                    width = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(8.dp)
                 )
-                Box(
-                    modifier = Modifier
-                        .border(
-                            width = 2.dp,
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(6.dp)
-                        .clickable { onSwitchToEasyMode() }
-                ) {
-                    Icon(
-                        Icons.Default.SwapHoriz,
-                        contentDescription = "Switch to easy mode",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
+                .padding(6.dp)
+                .clickable { onSwitchToEasyMode() }
+        ) {
+            Icon(
+                Icons.Default.SwapHoriz,
+                contentDescription = "Switch to easy mode",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
         }
+        
+        // Right: "Easy Mode"
+        Text(
+            "Easy Mode",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = typewriterFont,
+                fontSize = 14.sp
+            ),
+            color = androidx.compose.ui.graphics.Color(0xFF757575) // Grey
+        )
     }
 }

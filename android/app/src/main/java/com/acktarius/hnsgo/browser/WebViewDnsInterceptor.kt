@@ -1,7 +1,6 @@
 package com.acktarius.hnsgo.browser
 
 import android.net.Uri
-import android.util.Log
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import com.acktarius.hnsgo.DaneVerifier
@@ -29,6 +28,9 @@ import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+
+// Realistic mobile browser User-Agent to avoid 403 errors from sites like Qwant
+private const val MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
 /**
  * DNS interceptor for WebView that uses the DoH service for ALL domain resolution.
@@ -120,6 +122,7 @@ class WebViewDnsInterceptor {
     
     /**
      * Intercept WebView request and resolve DNS through DoH service.
+     * Returns null to let WebView handle the request if interception fails (for assets, etc.)
      */
     fun interceptRequest(request: WebResourceRequest): WebResourceResponse? {
         val uri = request.url
@@ -131,6 +134,7 @@ class WebViewDnsInterceptor {
         }
         
         val isHandshakeDomain = !Tld.isIcannDomain(host)
+        val isMainFrame = request.isForMainFrame
         
         return try {
             runBlocking(Dispatchers.IO) {
@@ -141,7 +145,13 @@ class WebViewDnsInterceptor {
                 }
             }
         } catch (e: Exception) {
-            createErrorResponse(e)
+            // For main frame requests, show error page
+            // For asset requests (JS, CSS, images), return null to allow fallback to system DNS
+            if (isMainFrame) {
+                createErrorResponse(e)
+            } else {
+                null // Let WebView handle with system DNS
+            }
         }
     }
     
@@ -215,6 +225,10 @@ class WebViewDnsInterceptor {
             .url(urlString)
         
         // Copy headers from WebResourceRequest
+        val hasUserAgent = request.requestHeaders?.containsKey("User-Agent") == true
+        val hasAcceptLanguage = request.requestHeaders?.containsKey("Accept-Language") == true
+        val hasAccept = request.requestHeaders?.containsKey("Accept") == true
+        
         request.requestHeaders?.forEach { (key, value) ->
             // Skip headers that OkHttp manages
             if (!key.equals("Host", ignoreCase = true) &&
@@ -222,6 +236,14 @@ class WebViewDnsInterceptor {
                 requestBuilder.addHeader(key, value)
             }
         }
+        
+        // Add essential headers if missing (needed for sites like Qwant to avoid 403 errors)
+        // Only add User-Agent - let WebView handle other headers to avoid encoding issues
+        if (!hasUserAgent) {
+            requestBuilder.addHeader("User-Agent", MOBILE_USER_AGENT)
+        }
+        // Don't add Accept-Encoding - let OkHttp handle compression automatically
+        // Don't add other headers - preserve WebView's original headers to avoid encoding issues
         
         when (request.method) {
             "GET" -> requestBuilder.get()
@@ -256,6 +278,11 @@ class WebViewDnsInterceptor {
             val body = resp.body
             val bodyBytes = body?.bytes() ?: ByteArray(0)
             
+            // Check if this is an RSS/Atom feed and convert to HTML viewer
+            if (InterceptRss.isRssFeed(mimeType, bodyBytes)) {
+                val feedUrl = uri.toString()
+                return InterceptRss.convertFeedToHtml(bodyBytes, feedUrl)
+            }
             
             WebResourceResponse(
                 mimeType,

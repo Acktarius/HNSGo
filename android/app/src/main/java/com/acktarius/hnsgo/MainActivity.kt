@@ -411,7 +411,7 @@ fun HnsGoScreen(act: MainActivity) {
                         // Explicitly handle state change to avoid OVERRIDE_UNSET warning
                     }
                 )
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     if (enabled) "ON" else "OFF",
                     style = MaterialTheme.typography.bodyLarge.copy(
@@ -423,7 +423,7 @@ fun HnsGoScreen(act: MainActivity) {
         }
 
         if (enabled) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
                 
                 // Sync status
                 when (syncStatus) {
@@ -432,7 +432,7 @@ fun HnsGoScreen(act: MainActivity) {
                             modifier = Modifier.size(32.dp),
                             color = MaterialTheme.colorScheme.onBackground
                         )
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(8.dp))
                         Text(
                             syncMessage,
                             style = MaterialTheme.typography.bodyMedium.copy(
@@ -472,7 +472,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
                     
                     Text(
                         "DNS Setup Instructions:",

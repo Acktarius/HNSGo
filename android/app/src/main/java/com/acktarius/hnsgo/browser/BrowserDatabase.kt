@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [FavoriteEntity::class, HistoryEntity::class],
-    version = 1,
+    version = 4,
     exportSchema = false
 )
 abstract class BrowserDatabase : RoomDatabase() {
@@ -24,7 +24,9 @@ abstract class BrowserDatabase : RoomDatabase() {
                     context.applicationContext,
                     BrowserDatabase::class.java,
                     "browser_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration() // For development - will recreate DB on schema change
+                .build()
                 INSTANCE = instance
                 instance
             }

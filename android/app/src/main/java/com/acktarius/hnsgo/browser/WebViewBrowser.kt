@@ -6,9 +6,12 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
@@ -52,8 +55,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.acktarius.hnsgo.browser.BrowserDatabase
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -72,6 +80,7 @@ fun WebViewBrowser(
     var canGoForward by remember { mutableStateOf(false) }
     var urlBarText by remember { mutableStateOf("") }
     var isEditingUrl by remember { mutableStateOf(false) }  // Track if user is editing URL bar
+    var currentFavicon by remember { mutableStateOf<String?>(null) }  // Track current page favicon
     
     val dnsInterceptor = remember { WebViewDnsInterceptor() }
     val database = remember { BrowserDatabase.getInstance(context) }
@@ -87,15 +96,14 @@ fun WebViewBrowser(
      * Get search URL for the selected search engine
      */
     fun getSearchUrl(query: String): String {
-        val engine = prefs.getString("search_engine", "qwant") ?: "qwant"
+        val engine = prefs.getString("search_engine", "duckduckgo") ?: "duckduckgo"
         val encodedQuery = Uri.encode(query)
         return when (engine) {
-            "qwant" -> "https://www.qwant.com/?q=$encodedQuery"
             "duckduckgo" -> "https://duckduckgo.com/?q=$encodedQuery"
             "google" -> "https://www.google.com/search?q=$encodedQuery"
             "startpage" -> "https://www.startpage.com/sp/search?query=$encodedQuery"
             "brave" -> "https://search.brave.com/search?q=$encodedQuery"
-            else -> "https://www.qwant.com/?q=$encodedQuery"
+            else -> "https://duckduckgo.com/?q=$encodedQuery"
         }
     }
     
@@ -204,6 +212,11 @@ fun WebViewBrowser(
             IconButton(
                 onClick = {
                     webViewState?.loadUrl("file:///android_asset/webviewer/home.html")
+                    // Refresh history when navigating to home
+                    scope.launch {
+                        kotlinx.coroutines.delay(300) // Wait for page to load
+                        webViewState?.evaluateJavascript("if(typeof loadRecentTabs === 'function') loadRecentTabs();", null)
+                    }
                 },
                 modifier = Modifier.size(40.dp)
             ) {
@@ -290,19 +303,46 @@ fun WebViewBrowser(
                         setBackgroundColor(0x00000000) // Transparent background
                         
                         settings.apply {
+                            // JavaScript & Storage - Required for modern websites to function
+                            // We intercept all requests through our DoH resolver for privacy
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
+                            
+                            // Set realistic mobile browser User-Agent to avoid 403 errors from sites like Qwant
+                            // This makes the WebView appear as a regular Chrome mobile browser
+                            // Must match the User-Agent used in WebViewDnsInterceptor
+                            userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                            
+                            // Security: Block mixed content (HTTP on HTTPS pages)
+                            // This prevents insecure resources from loading on secure pages
+                            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                            
+                            // Privacy: Restrict file access to prevent sites from accessing device files
+                            allowFileAccess = false
+                            allowContentAccess = false
+                            
+                            // Privacy: Disable geolocation API (sites can't access device location)
+                            setGeolocationEnabled(false)
+                            
+                            // Security: Prevent JavaScript from automatically opening windows (popups)
+                            javaScriptCanOpenWindowsAutomatically = false
+                            
+                            // Cache settings
                             cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            
+                            // Display settings
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             setSupportZoom(true)
                             builtInZoomControls = true
                             displayZoomControls = false
-                            allowFileAccess = true
-                            allowContentAccess = true
                         }
+                        
+                        // Privacy: Cookie and tracking prevention
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true) // Accept first-party cookies (needed for site functionality)
+                        cookieManager.setAcceptThirdPartyCookies(this, false) // Block third-party cookies (tracking)
                         
                         // JavaScript interface to sync search engine selection and get favorites/history
                         addJavascriptInterface(object {
@@ -313,19 +353,20 @@ fun WebViewBrowser(
                             
                             @android.webkit.JavascriptInterface
                             fun getSearchEngine(): String {
-                                return prefs.getString("search_engine", "qwant") ?: "qwant"
+                                return prefs.getString("search_engine", "duckduckgo") ?: "duckduckgo"
                             }
                             
                             @android.webkit.JavascriptInterface
                             fun getFavorites(): String {
-                                return runBlocking {
+                                return runBlocking(Dispatchers.IO) {
                                     try {
                                         val favorites = dao.getAllFavoritesList()
-                                        // Convert to JSON
-                                        val json = favorites.joinToString(",", "[", "]") { fav ->
-                                            """{"id":${fav.id},"title":"${fav.title.replace("\"", "\\\"")}","url":"${fav.url.replace("\"", "\\\"")}","favicon":"${fav.favicon ?: ""}"}"""
+                                        // Convert to JSON in parallel with string building
+                                        withContext(Dispatchers.Default) {
+                                            favorites.joinToString(",", "[", "]") { fav ->
+                                                """{"id":${fav.id},"title":"${fav.title.replace("\"", "\\\"")}","url":"${fav.url.replace("\"", "\\\"")}","favicon":"${fav.favicon ?: ""}"}"""
+                                            }
                                         }
-                                        json
                                     } catch (e: Exception) {
                                         "[]"
                                     }
@@ -352,29 +393,130 @@ fun WebViewBrowser(
                             
                             @android.webkit.JavascriptInterface
                             fun getRecentHistory(): String {
+                                return runBlocking(Dispatchers.IO) {
+                                    try {
+                                        // Test database access
+                                        val allHistory = dao.getRecentHistoryList()
+                                        val history = allHistory.filter { !it.url.startsWith("file:///android_asset/") }
+                                        // Log for debugging (count only, no URLs)
+                                        android.util.Log.d("WebViewBrowser", "History query: found ${allHistory.size} total, ${history.size} after filter")
+                                        
+                                        // If empty, try to verify database is working
+                                        if (allHistory.isEmpty()) {
+                                            android.util.Log.d("WebViewBrowser", "History is empty - database may have been cleared or not initialized")
+                                        }
+                                        
+                                        // Convert to JSON in parallel with string building
+                                        withContext(Dispatchers.Default) {
+                                            if (history.isEmpty()) {
+                                                "[]"
+                                            } else {
+                                                history.joinToString(",", "[", "]") { hist ->
+                                                    val faviconEscaped = hist.favicon?.replace("\"", "\\\"")?.replace("\n", "") ?: ""
+                                                    """{"id":${hist.id},"title":"${hist.title.replace("\"", "\\\"")}","url":"${hist.url.replace("\"", "\\\"")}","favicon":"$faviconEscaped","visitedAt":${hist.visitedAt}}"""
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("WebViewBrowser", "History query failed: ${e.message}", e)
+                                        "[]"
+                                    }
+                                }
+                            }
+                            
+                            @android.webkit.JavascriptInterface
+                            fun onRssFeedFound(rssLinksJson: String) {
+                                // RSS feeds discovered - could be used for future features
+                                // (e.g., showing RSS icon in navigation bar, feed subscriptions, etc.)
+                                // For now, we just acknowledge the discovery
+                            }
+                            
+                            @android.webkit.JavascriptInterface
+                            fun refreshHistory() {
+                                // Trigger history refresh on home page
+                                scope.launch(Dispatchers.Main) {
+                                    webViewState?.evaluateJavascript("if(typeof loadRecentTabs === 'function') loadRecentTabs();", null)
+                                }
+                            }
+                            
+                            @android.webkit.JavascriptInterface
+                            fun clearCookiesAndHistory(): Boolean {
                                 return runBlocking {
                                     try {
-                                        val history = dao.getRecentHistoryList()
-                                            .filter { !it.url.startsWith("file:///android_asset/") }
-                                        // Convert to JSON
-                                        val json = history.joinToString(",", "[", "]") { hist ->
-                                            """{"id":${hist.id},"title":"${hist.title.replace("\"", "\\\"")}","url":"${hist.url.replace("\"", "\\\"")}","visitedAt":${hist.visitedAt}}"""
+                                        // Parallelize independent operations for better performance
+                                        val cookieJob = async(Dispatchers.IO) {
+                                            try {
+                                                val cookieManager = CookieManager.getInstance()
+                                                cookieManager.removeAllCookies(null)
+                                                cookieManager.flush()
+                                                delay(200) // Wait for async cookie removal
+                                                true
+                                            } catch (e: Exception) {
+                                                false
+                                            }
                                         }
-                                        json
+                                        
+                                        val cacheJob = async(Dispatchers.Main) {
+                                            try {
+                                                webViewState?.let { view ->
+                                                    view.clearCache(true)
+                                                    view.clearHistory()
+                                                }
+                                                true
+                                            } catch (e: Exception) {
+                                                false
+                                            }
+                                        }
+                                        
+                                        val storageJob = async(Dispatchers.IO) {
+                                            try {
+                                                WebStorage.getInstance().deleteAllData()
+                                                true
+                                            } catch (e: Exception) {
+                                                false
+                                            }
+                                        }
+                                        
+                                        val databaseJob = async(Dispatchers.IO) {
+                                            try {
+                                                dao.clearHistory()
+                                                android.util.Log.d("WebViewBrowser", "History cleared successfully")
+                                                true
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("WebViewBrowser", "History clear failed: ${e.message}")
+                                                false
+                                            }
+                                        }
+                                        
+                                        // Wait for all operations to complete in parallel
+                                        val results = awaitAll(cookieJob, cacheJob, storageJob, databaseJob)
+                                        
+                                        // Return true if at least some operations succeeded
+                                        results.any { it }
                                     } catch (e: Exception) {
-                                        "[]"
+                                        false
                                     }
                                 }
                             }
                         }, "Android")
                         
                         webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): Boolean {
+                                // Allow all navigation - don't block same-origin or fragment changes
+                                // This is critical for JavaScript navigation and in-page links
+                                return false // Let WebView handle the navigation
+                            }
+                            
                             override fun shouldInterceptRequest(
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ): android.webkit.WebResourceResponse? {
                                 request?.let {
                                     // Intercept and resolve through custom DNS (DoH)
+                                    // This handles ALL requests: HTML, JS, CSS, images, etc.
                                     val response = dnsInterceptor.interceptRequest(it)
                                     if (response != null) {
                                         // Return DoH-resolved response
@@ -392,22 +534,88 @@ fun WebViewBrowser(
                             ) {
                                 isLoading = true
                                 progress = 0
+                                
+                                // Privacy: Clear cookies on cross-site navigation for maximum anonymity
+                                // This prevents tracking across different websites
+                                // Exception: Allow cookies for qwant.com and api.qwant.com
+                                pageUrl?.let { newUrl ->
+                                    val newHost = Uri.parse(newUrl).host
+                                    val currentHost = Uri.parse(url).host
+                                    
+                                    // Qwant domains that should preserve cookies
+                                    val qwantDomains = setOf("qwant.com", "www.qwant.com", "api.qwant.com", "lite.qwant.com")
+                                    val isQwantDomain = { host: String? -> 
+                                        host != null && qwantDomains.any { host == it || host.endsWith(".$it") }
+                                    }
+                                    
+                                    // Clear cookies when navigating to a different domain
+                                    // But preserve cookies if navigating to/from Qwant domains
+                                    if (newHost != null && currentHost != null && newHost != currentHost) {
+                                        val preserveCookies = isQwantDomain(newHost) || isQwantDomain(currentHost)
+                                        if (!preserveCookies) {
+                                            CookieManager.getInstance().removeSessionCookies(null)
+                                            CookieManager.getInstance().flush()
+                                        }
+                                    }
+                                }
+                                
                                 url = pageUrl ?: ""
+                                // Generate favicon URL from page URL (fallback if onReceivedIcon doesn't fire)
+                                pageUrl?.let { url ->
+                                    try {
+                                        if (!url.startsWith("file:///android_asset/") && 
+                                            (url.startsWith("http://") || url.startsWith("https://"))) {
+                                            val uri = Uri.parse(url)
+                                            val faviconUrl = "${uri.scheme}://${uri.host}/favicon.ico"
+                                            currentFavicon = faviconUrl
+                                        }
+                                    } catch (e: Exception) {
+                                        currentFavicon = null
+                                    }
+                                }
+                                
                                 // Only update URL bar if user is not actively editing
                                 if (!isEditingUrl) {
                                     urlBarText = if (pageUrl == homeUrl) "" else (pageUrl ?: "")
                                 }
                                 
-                                // Save to history (skip file:// URLs)
+                                // Save to history (skip file:// URLs) - async, non-blocking
                                 scope.launch {
                                     pageUrl?.let {
                                         // Don't save file:// URLs (home page, etc.)
                                         if (!it.startsWith("file:///android_asset/")) {
-                                            val history = HistoryEntity(
-                                                title = view?.title ?: "Loading...",
-                                                url = it
-                                            )
-                                            dao.insertHistory(history)
+                                            try {
+                                                // Get title on main thread (WebView requires main thread)
+                                                val pageTitle = withContext(Dispatchers.Main) {
+                                                    view?.title ?: "Loading..."
+                                                }
+                                                
+                                                // Then do database operations on IO thread
+                                                withContext(Dispatchers.IO) {
+                                                    // Check if URL already exists to prevent duplicates
+                                                    val existing = dao.getHistoryByUrl(it)
+                                                    val favicon = currentFavicon // Capture current favicon
+                                                    if (existing == null) {
+                                                        // Insert new entry only if it doesn't exist
+                                                        val history = HistoryEntity(
+                                                            title = pageTitle,
+                                                            url = it,
+                                                            favicon = favicon
+                                                        )
+                                                        dao.insertHistory(history)
+                                                    } else {
+                                                        // Update existing entry timestamp to move it to top
+                                                        val updated = existing.copy(
+                                                            visitedAt = System.currentTimeMillis(),
+                                                            favicon = favicon ?: existing.favicon // Keep existing favicon if new one not available
+                                                        )
+                                                        dao.insertHistory(updated)
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                // Log error for debugging (no URL in message)
+                                                android.util.Log.e("WebViewBrowser", "History insertion in onPageStarted failed: ${e.message}", e)
+                                            }
                                         }
                                     }
                                 }
@@ -419,19 +627,89 @@ fun WebViewBrowser(
                                 canGoBack = view?.canGoBack() ?: false
                                 canGoForward = view?.canGoForward() ?: false
                                 
-                                // Update history with final title (skip file:// URLs)
+                                // Refresh history if we're on the home page
+                                pageUrl?.let {
+                                    if (it.startsWith("file:///android_asset/webviewer/home.html")) {
+                                        scope.launch {
+                                            delay(100) // Small delay to ensure page is ready
+                                            view?.evaluateJavascript("if(typeof loadRecentTabs === 'function') loadRecentTabs();", null)
+                                        }
+                                    }
+                                }
+                                
+                                // Inject RSS auto-discovery script for HTML pages
+                                pageUrl?.let {
+                                    if (!it.startsWith("file:///android_asset/") && 
+                                        (it.startsWith("http://") || it.startsWith("https://"))) {
+                                        val rssScript = InterceptRss.getRssAutoDiscoveryScript()
+                                        view?.evaluateJavascript(rssScript, null)
+                                        
+                                        // Discover favicon URL from page HTML
+                                        view?.evaluateJavascript("""
+                                            (function() {
+                                                var link = document.querySelector('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
+                                                if (link && link.href) {
+                                                    return link.href;
+                                                }
+                                                // Fallback to standard location
+                                                var url = new URL(window.location.href);
+                                                return url.origin + '/favicon.ico';
+                                            })();
+                                        """.trimIndent()) { faviconUrl ->
+                                            if (faviconUrl != null && faviconUrl != "null" && faviconUrl.isNotEmpty()) {
+                                                // Remove quotes from JavaScript string result
+                                                val cleanUrl = faviconUrl.removeSurrounding("\"")
+                                                currentFavicon = cleanUrl
+                                                
+                                                // Update history with discovered favicon
+                                                scope.launch {
+                                                    try {
+                                                        withContext(Dispatchers.IO) {
+                                                            val existing = dao.getHistoryByUrl(it)
+                                                            if (existing != null) {
+                                                                val updated = existing.copy(
+                                                                    favicon = cleanUrl
+                                                                )
+                                                                dao.insertHistory(updated)
+                                                            }
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        android.util.Log.e("WebViewBrowser", "Favicon update failed: ${e.message}", e)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Update history with final title (skip file:// URLs) - async, non-blocking
                                 scope.launch {
                                     pageUrl?.let {
                                         // Don't save file:// URLs (home page, etc.)
                                         if (!it.startsWith("file:///android_asset/")) {
-                                            val existing = dao.getHistoryByUrl(it)
-                                            val pageTitle = view?.title
-                                            if (existing != null && pageTitle != null) {
-                                                val updated = existing.copy(
-                                                    title = pageTitle,
-                                                    visitedAt = System.currentTimeMillis()
-                                                )
-                                                dao.insertHistory(updated)
+                                            try {
+                                                // Get title on main thread (WebView requires main thread)
+                                                val pageTitle = withContext(Dispatchers.Main) {
+                                                    view?.title
+                                                }
+                                                
+                                                // Then do database operations on IO thread
+                                                withContext(Dispatchers.IO) {
+                                                    val existing = dao.getHistoryByUrl(it)
+                                                    val favicon = currentFavicon // Capture current favicon
+                                                    if (existing != null && pageTitle != null) {
+                                                        // Update existing entry with final title, favicon, and current timestamp
+                                                        val updated = existing.copy(
+                                                            title = pageTitle,
+                                                            favicon = favicon ?: existing.favicon, // Keep existing favicon if new one not available
+                                                            visitedAt = System.currentTimeMillis()
+                                                        )
+                                                        dao.insertHistory(updated)
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                // Log error for debugging (no URL in message)
+                                                android.util.Log.e("WebViewBrowser", "History update in onPageFinished failed: ${e.message}", e)
                                             }
                                         }
                                     }
@@ -464,6 +742,49 @@ fun WebViewBrowser(
                             override fun onReceivedTitle(view: WebView?, title: String?) {
                                 // Title is updated in onPageFinished
                             }
+                            
+                            override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
+                                // Favicon received - try to discover actual favicon URL from page HTML
+                                view?.url?.let { url ->
+                                    if (!url.startsWith("file:///android_asset/") && 
+                                        (url.startsWith("http://") || url.startsWith("https://"))) {
+                                        // Try to get favicon URL from page HTML
+                                        view.evaluateJavascript("""
+                                            (function() {
+                                                var link = document.querySelector('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
+                                                if (link && link.href) {
+                                                    return link.href;
+                                                }
+                                                // Fallback to standard location
+                                                var url = new URL(window.location.href);
+                                                return url.origin + '/favicon.ico';
+                                            })();
+                                        """.trimIndent()) { faviconUrl ->
+                                            if (faviconUrl != null && faviconUrl != "null" && faviconUrl.isNotEmpty()) {
+                                                // Remove quotes from JavaScript string result
+                                                val cleanUrl = faviconUrl.removeSurrounding("\"")
+                                                currentFavicon = cleanUrl
+                                            } else {
+                                                // Fallback: generate from URL
+                                                try {
+                                                    val uri = Uri.parse(url)
+                                                    currentFavicon = "${uri.scheme}://${uri.host}/favicon.ico"
+                                                } catch (e: Exception) {
+                                                    currentFavicon = null
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Privacy & Security: Explicitly deny all permission requests
+                            // This prevents websites from accessing camera, microphone, Bluetooth, etc.
+                            override fun onPermissionRequest(request: PermissionRequest?) {
+                                // Deny all permission requests for maximum privacy and security
+                                // This includes: camera, microphone, Bluetooth, protected media, etc.
+                                request?.deny()
+                            }
                         }
                         
                         webViewState = this
@@ -494,6 +815,17 @@ fun WebViewBrowser(
     
     DisposableEffect(Unit) {
         onDispose {
+            // Privacy: Clear all cookies and data when browser is closed
+            // This ensures no tracking data persists between sessions
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+            
+            // Clear WebView cache and storage
+            webViewState?.clearCache(true)
+            webViewState?.clearHistory()
+            WebStorage.getInstance().deleteAllData()
+            
             webViewState?.destroy()
         }
     }

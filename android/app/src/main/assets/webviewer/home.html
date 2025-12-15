@@ -19,17 +19,31 @@
                 <div class="shortcut-icon">⭐</div>
                 <div class="shortcut-name">Favorites</div>
             </div>
-            <a href="https://hns.to/" class="shortcut">
-                <div class="shortcut-icon">🔍</div>
-                <div class="shortcut-name">HNS Search</div>
-            </a>
             <div class="shortcut" id="searchEngineSelector" onclick="showSearchEngineMenu()">
-                <div class="shortcut-icon" id="searchEngineIcon">🔍</div>
-                <div class="shortcut-name" id="searchEngineName">Qwant</div>
+                <div class="shortcut-icon" id="searchEngineIcon">🦆</div>
+                <div class="shortcut-name" id="searchEngineName">DuckDuckGo</div>
+            </div>
+            <a href="https://handshake.org/" class="shortcut">
+                <div class="shortcut-icon">                    
+                    <img src="icons/logo-handshake.png" alt="Handshake" class="shortcut-icon-img">
+                </div>
+                <div class="shortcut-name">Handshake</div>
+            </a>
+            <div class="shortcut" id="cleanSelector" onclick="clearCookiesAndHistory()">
+                <div class="shortcut-icon">🧹</div>
+                <div class="shortcut-name">Clean</div>
             </div>
             <a href="https://namebase.io/" class="shortcut">
-                <div class="shortcut-icon">💼</div>
+                <div class="shortcut-icon">
+                    <img src="icons/favicon-namebase.png" alt="Namebase" class="shortcut-icon-img">
+                </div>
                 <div class="shortcut-name">Namebase</div>
+            </a>
+            <a href="https://dweb.conceal/" class="shortcut">
+                <div class="shortcut-icon">
+                    <img src="icons/logo-conceal.svg" alt="Conceal Network" class="shortcut-icon-img shortcut-icon-conceal">
+                </div>
+                <div class="shortcut-name">Conceal Network</div>    
             </a>
         </div>
         
@@ -49,14 +63,19 @@
         </div>
     </div>
     
+    <!-- Custom Dialog -->
+    <div class="custom-dialog-overlay" id="customDialogOverlay" onclick="hideCustomDialog()">
+        <div class="custom-dialog" onclick="event.stopPropagation()">
+            <div class="custom-dialog-title" id="customDialogTitle">HNSGo</div>
+            <div class="custom-dialog-message" id="customDialogMessage"></div>
+            <div class="custom-dialog-buttons" id="customDialogButtons"></div>
+        </div>
+    </div>
+    
     <!-- Search Engine Selector Menu -->
     <div class="search-engine-menu" id="searchEngineMenu" onclick="hideSearchEngineMenu(event)">
         <div class="search-engine-options" onclick="event.stopPropagation()">
             <h2 style="margin-bottom: 20px; text-align: center;">Select Search Engine</h2>
-            <div class="search-engine-option" data-engine="qwant" onclick="selectSearchEngine('qwant', '🔍', 'Qwant')">
-                <div class="search-engine-option-icon">🔍</div>
-                <div class="search-engine-option-name">Qwant</div>
-            </div>
             <div class="search-engine-option" data-engine="duckduckgo" onclick="selectSearchEngine('duckduckgo', '🦆', 'DuckDuckGo')">
                 <div class="search-engine-option-icon">🦆</div>
                 <div class="search-engine-option-name">DuckDuckGo</div>
@@ -79,7 +98,6 @@
     <script>
         // Search engines configuration
         const searchEngines = {
-            qwant: { url: 'https://www.qwant.com/?q=', icon: '🔍', name: 'Qwant' },
             duckduckgo: { url: 'https://duckduckgo.com/?q=', icon: '🦆', name: 'DuckDuckGo' },
             google: { url: 'https://www.google.com/search?q=', icon: '🔎', name: 'Google' },
             startpage: { url: 'https://www.startpage.com/sp/search?query=', icon: '🌐', name: 'Startpage' },
@@ -88,12 +106,16 @@
         
         // Load saved search engine (from Android or localStorage)
         function loadSearchEngine() {
-            let saved = 'qwant';
+            let saved = 'duckduckgo';
             // Try to get from Android first
             if (typeof Android !== 'undefined' && Android.getSearchEngine) {
                 saved = Android.getSearchEngine();
             } else {
-                saved = localStorage.getItem('searchEngine') || 'qwant';
+                saved = localStorage.getItem('searchEngine') || 'duckduckgo';
+            }
+            // Fallback to DuckDuckGo if saved engine doesn't exist (e.g., old 'qwant' preference)
+            if (!searchEngines[saved]) {
+                saved = 'duckduckgo';
             }
             const engine = searchEngines[saved];
             document.getElementById('searchEngineIcon').textContent = engine.icon;
@@ -145,16 +167,23 @@
         // Search functionality
         document.getElementById('searchInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                let query = this.value;
+                let query = this.value.trim();
+                if (!query) return; // Don't search empty queries
+                
                 if (query.startsWith('http://') || query.startsWith('https://')) {
                     window.location.href = query;
                 } else if (query.includes('.')) {
                     window.location.href = 'https://' + query;
                 } else {
                     // Use selected search engine
-                    currentSearchEngine = localStorage.getItem('searchEngine') || 'qwant';
+                    currentSearchEngine = loadSearchEngine();
                     const engine = searchEngines[currentSearchEngine];
-                    window.location.href = engine.url + encodeURIComponent(query);
+                    // Fallback to DuckDuckGo if engine not found (e.g., old 'qwant' preference)
+                    if (engine) {
+                        window.location.href = engine.url + encodeURIComponent(query);
+                    } else {
+                        window.location.href = searchEngines['duckduckgo'].url + encodeURIComponent(query);
+                    }
                 }
             }
         });
@@ -309,15 +338,30 @@
                     return;
                 }
                 
-                container.innerHTML = history.map(tab => `
+                container.innerHTML = history.map(tab => {
+                    const faviconDisplay = tab.favicon 
+                        ? `<img src="${tab.favicon}" alt="" class="tab-favicon-img" onerror="this.parentElement.innerHTML='🌐';">`
+                        : '🌐';
+                    // Truncate title if too long (max 40 characters)
+                    const maxTitleLength = 40;
+                    const displayTitle = tab.title.length > maxTitleLength 
+                        ? tab.title.substring(0, maxTitleLength) + '...'
+                        : tab.title;
+                    // Truncate URL if too long (max 60 characters)
+                    const maxUrlLength = 60;
+                    const displayUrl = tab.url.length > maxUrlLength 
+                        ? tab.url.substring(0, maxUrlLength) + '...'
+                        : tab.url;
+                    return `
                     <div class="tab-item" onclick="window.location.href='${tab.url}'">
-                        <div class="tab-favicon">🌐</div>
+                        <div class="tab-favicon">${faviconDisplay}</div>
                         <div class="tab-info">
-                            <div class="tab-title">${tab.title}</div>
-                            <div class="tab-url">${tab.url}</div>
+                            <div class="tab-title" title="${tab.title}">${displayTitle}</div>
+                            <div class="tab-url" title="${tab.url}">${displayUrl}</div>
                         </div>
                     </div>
-                `).join('');
+                `;
+                }).join('');
             } catch (e) {
                 console.error('Error loading history:', e);
                 document.getElementById('recentTabsList').innerHTML = '<p style="color: white; text-align: center;">Error loading history</p>';
@@ -325,6 +369,106 @@
         }
         
         loadRecentTabs();
+        
+        // Refresh history when page becomes visible again (user navigates back to home)
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) {
+                loadRecentTabs();
+            }
+        });
+        
+        // Refresh on pageshow event (handles back/forward navigation and page reload)
+        window.addEventListener('pageshow', function(event) {
+            loadRecentTabs();
+        });
+        
+        // Refresh history when page gains focus (user returns to app)
+        window.addEventListener('focus', function() {
+            loadRecentTabs();
+        });
+        
+        // Custom dialog functions
+        function showCustomDialog(title, message, buttons) {
+            document.getElementById('customDialogTitle').textContent = title;
+            document.getElementById('customDialogMessage').textContent = message;
+            const buttonsContainer = document.getElementById('customDialogButtons');
+            buttonsContainer.innerHTML = '';
+            buttons.forEach(btn => {
+                const button = document.createElement('button');
+                button.className = `custom-dialog-button ${btn.class || 'secondary'}`;
+                button.textContent = btn.text;
+                button.onclick = () => {
+                    hideCustomDialog();
+                    if (btn.onclick) btn.onclick();
+                };
+                buttonsContainer.appendChild(button);
+            });
+            document.getElementById('customDialogOverlay').classList.add('active');
+        }
+        
+        function hideCustomDialog() {
+            document.getElementById('customDialogOverlay').classList.remove('active');
+        }
+        
+        // Clear cookies and history
+        function clearCookiesAndHistory() {
+            showCustomDialog(
+                'HNSGo',
+                'HNSGo wants to clear your cookies and browsing history. This cannot be undone.',
+                [
+                    {
+                        text: 'Cancel',
+                        class: 'secondary',
+                        onclick: () => {}
+                    },
+                    {
+                        text: 'Clear',
+                        class: 'primary',
+                        onclick: () => {
+                            if (typeof Android !== 'undefined' && Android.clearCookiesAndHistory) {
+                                // Call async and wait for result
+                                setTimeout(() => {
+                                    const success = Android.clearCookiesAndHistory();
+                                    if (success) {
+                                        showCustomDialog(
+                                            'HNSGo',
+                                            'Cookies and history cleared successfully!',
+                                            [{
+                                                text: 'OK',
+                                                class: 'primary',
+                                                onclick: () => {
+                                                    loadRecentTabs();
+                                                }
+                                            }]
+                                        );
+                                    } else {
+                                        showCustomDialog(
+                                            'HNSGo',
+                                            'Failed to clear data. Please try again.',
+                                            [{
+                                                text: 'OK',
+                                                class: 'primary',
+                                                onclick: () => {}
+                                            }]
+                                        );
+                                    }
+                                }, 100);
+                            } else {
+                                showCustomDialog(
+                                    'HNSGo',
+                                    'Clear function not available.',
+                                    [{
+                                        text: 'OK',
+                                        class: 'primary',
+                                        onclick: () => {}
+                                    }]
+                                );
+                            }
+                        }
+                    }
+                ]
+            );
+        }
     </script>
 </body>
 </html>
