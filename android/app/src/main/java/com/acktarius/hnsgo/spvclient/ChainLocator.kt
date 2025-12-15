@@ -94,8 +94,11 @@ internal object ChainLocator {
             }
             
             // hnsd limits to sizeof(msg->hashes) - 1 (line 317)
-            if (i >= maxHashes - 1) {
-                height = 0  // Force to genesis (matching hnsd line 317-318)
+            // EXACT MATCH: hnsd uses i == sizeof(msg->hashes) - 1 (i == 63)
+            // This happens BEFORE incrementing i, so when i == 63, we force height = 0
+            // then add the hash and i becomes 64 (max count)
+            if (i == maxHashes - 1) {
+                height = 0  // Force to genesis (matching hnsd line 317-318 exactly)
             }
             
             // Check if we have this header (matching hnsd line 320: hsk_chain_get_by_height)

@@ -122,9 +122,14 @@ object Config {
     
     // P2P Connection Configuration
     const val P2P_CONNECT_TIMEOUT_MS = 10000  // Connection timeout (10 seconds)
-    const val P2P_SOCKET_TIMEOUT_MS = 30000  // Socket read timeout (30 seconds)
+    const val P2P_SOCKET_TIMEOUT_MS = 15000  // Socket read timeout (15 seconds)
     const val P2P_MAX_RETRIES = 3  // Max retries per seed node
     const val P2P_RETRY_BASE_DELAY_MS = 1000L  // Base delay for exponential backoff (1 second)
+    
+    // P2P Header Sync Timeouts (matching hnsd pool.c:807-811)
+    const val P2P_BLOCK_TIMEOUT_MS = 10 * 60 * 1000L  // No block received timeout (10 minutes, matching hnsd)
+    const val P2P_GETHEADERS_RESEND_TIMEOUT_MS = 5 * 60 * 1000L  // Getheaders resend timeout (5 minutes, matching hnsd)
+    const val P2P_PEER_TIMEOUT_MS = 10000L  // Per-peer timeout before skipping (10 seconds, matching hnsd's 30s getheaders timeout but more aggressive)
     
     // DNS Resolution Configuration
     const val HANDSHAKE_RESOLUTION_TIMEOUT_MS = 15000L  // Timeout for Handshake domain resolution (15 seconds)

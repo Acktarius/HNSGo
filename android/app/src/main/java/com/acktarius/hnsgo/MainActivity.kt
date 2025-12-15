@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,6 +40,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -67,10 +70,13 @@ import android.util.Log
 import android.widget.Toast
 import com.acktarius.hnsgo.util.FirefoxUtils
 import com.acktarius.hnsgo.adblocker.AdBlockManager
+import com.acktarius.hnsgo.ui.Step0Mode
 import com.acktarius.hnsgo.ui.Step1Certificate
 import com.acktarius.hnsgo.ui.Step2FirefoxCA
 import com.acktarius.hnsgo.ui.Step3FirefoxDoH
 import com.acktarius.hnsgo.ui.Step4AdBlocking
+import com.acktarius.hnsgo.browser.FlipCard
+import com.acktarius.hnsgo.browser.WebViewBrowser
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -175,6 +181,7 @@ fun HnsGoScreen(act: MainActivity) {
     val scope = rememberCoroutineScope()
     val typewriterFont = FontFamily.Monospace
     var syncJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var isLazyMode by remember { mutableStateOf(false) }
     
     // Check certificate installation status on mount
     LaunchedEffect(Unit) {
@@ -187,9 +194,7 @@ fun HnsGoScreen(act: MainActivity) {
         
         // Check if Firefox is installed
         firefoxAvailable = FirefoxUtils.isFirefoxInstalled(act)
-        Log.d("MainActivity", "Firefox detection: firefoxAvailable = $firefoxAvailable")
         val firefoxPackage = FirefoxUtils.getFirefoxPackageName(act)
-        Log.d("MainActivity", "Firefox package: $firefoxPackage")
     }
     
     // Listen for debug query results from DohService
@@ -288,12 +293,24 @@ fun HnsGoScreen(act: MainActivity) {
                             uiUpdateJob.cancel()
                             
                             // Final UI update
+                            // Matching hnsd behavior: DNS service is available even when not fully synced
+                            // hnsd serves DNS queries immediately, only blocking Handshake resolution until synced
+                            // Show SYNCED when close enough (within 200 blocks) since service is usable
                             if (updatedNetworkHeight != null) {
                                 val stillBehind = updatedNetworkHeight - updatedOurHeight
-                                if (stillBehind <= 10) { // Within 10 blocks = caught up
+                                // Match HeaderSync logic: within 10 blocks = fully caught up
+                                // But also show SYNCED when within 200 blocks since service is usable
+                                // (hnsd serves DNS even when not fully synced)
+                                if (stillBehind <= 10) {
                                     withContext(Dispatchers.Main) {
                                         syncStatus = SyncStatus.SYNCED
                                         syncMessage = "Sync complete"
+                                    }
+                                } else if (stillBehind <= 200) {
+                                    // Close enough - service is usable (matching hnsd behavior)
+                                    withContext(Dispatchers.Main) {
+                                        syncStatus = SyncStatus.SYNCED
+                                        syncMessage = "Ready (syncing last ${stillBehind} blocks in background)"
                                     }
                                 } else {
                                     withContext(Dispatchers.Main) {
@@ -334,7 +351,6 @@ fun HnsGoScreen(act: MainActivity) {
                 // 3. Save headers to preserve progress
                 try {
                     SpvClient.forceSaveHeaders()
-                    android.util.Log.d("HNSGo", "MainActivity: Headers saved successfully on stop")
                 } catch (e: Exception) {
                     android.util.Log.w("HNSGo", "MainActivity: Failed to save headers on stop", e)
                 }
@@ -355,11 +371,15 @@ fun HnsGoScreen(act: MainActivity) {
     val disclaimerExpanded = remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-    ) {
+    // Flip card to switch between Regular Mode (instructions) and Lazy Mode (browser)
+    FlipCard(
+        frontContent = {
+            // Front: Regular Mode (Instructions)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+            ) {
         // Main content - scrollable
         Column(
             modifier = Modifier
@@ -447,7 +467,12 @@ fun HnsGoScreen(act: MainActivity) {
 
                 // DNS Setup Guidance
                 if (showGuidance && syncStatus == SyncStatus.SYNCED) {
-                    Spacer(Modifier.height(32.dp))
+                    Step0Mode(
+                        onSwitchToEasyMode = { isLazyMode = true },
+                        typewriterFont = typewriterFont
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
                     
                     Text(
                         "DNS Setup Instructions:",
@@ -459,7 +484,7 @@ fun HnsGoScreen(act: MainActivity) {
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(8.dp))
                     
                     // Step 1: Install CA Certificate
                     Step1Certificate(
@@ -469,7 +494,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
                     
                     // Step 2: Enable Third-Party CA in Firefox
                     Step2FirefoxCA(
@@ -478,7 +503,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
                     
                     // Step 3: Configure Firefox DoH
                     Step3FirefoxDoH(
@@ -489,7 +514,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
                     
                     // Step 4: Enable Ad Blocking
                     Step4AdBlocking(
@@ -506,7 +531,7 @@ fun HnsGoScreen(act: MainActivity) {
                         typewriterFont = typewriterFont
                     )
                     
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
                     
                     Text(
                         "DANE Inspector",
@@ -942,5 +967,17 @@ fun HnsGoScreen(act: MainActivity) {
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 16.dp)
         )
-    }
+        }
+        },
+        backContent = {
+            // Back: Lazy Mode (WebView Browser)
+            WebViewBrowser(
+                onNavigateBack = { isLazyMode = false }
+            )
+        },
+        isFlipped = isLazyMode,
+        onFlip = { isLazyMode = !isLazyMode },
+        modifier = Modifier.fillMaxSize(),
+        showSwitchButton = false
+    )
 }

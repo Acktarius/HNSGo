@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HNS Go Browser</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 HNSGo Browser</h1>
+        
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search or enter website">
+        </div>
+        
+        <div class="shortcuts" id="shortcuts">
+            <div class="shortcut" id="favoritesSelector" onclick="showFavoritesMenu()">
+                <div class="shortcut-icon">⭐</div>
+                <div class="shortcut-name">Favorites</div>
+            </div>
+            <a href="https://hns.to/" class="shortcut">
+                <div class="shortcut-icon">🔍</div>
+                <div class="shortcut-name">HNS Search</div>
+            </a>
+            <div class="shortcut" id="searchEngineSelector" onclick="showSearchEngineMenu()">
+                <div class="shortcut-icon" id="searchEngineIcon">🔍</div>
+                <div class="shortcut-name" id="searchEngineName">Qwant</div>
+            </div>
+            <a href="https://namebase.io/" class="shortcut">
+                <div class="shortcut-icon">💼</div>
+                <div class="shortcut-name">Namebase</div>
+            </a>
+        </div>
+        
+        <div class="recent-tabs">
+            <div class="section-title">Recent History</div>
+            <div id="recentTabsList"></div>
+        </div>
+    </div>
+    
+    <!-- Favorites Menu -->
+    <div class="search-engine-menu" id="favoritesMenu" onclick="hideFavoritesMenu(event)">
+        <div class="search-engine-options" onclick="event.stopPropagation()">
+            <h2 style="margin-bottom: 20px; text-align: center;">Favorites</h2>
+            <div id="favoritesList">
+                <p style="text-align: center; color: #666; padding: 20px;">Loading favorites...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Search Engine Selector Menu -->
+    <div class="search-engine-menu" id="searchEngineMenu" onclick="hideSearchEngineMenu(event)">
+        <div class="search-engine-options" onclick="event.stopPropagation()">
+            <h2 style="margin-bottom: 20px; text-align: center;">Select Search Engine</h2>
+            <div class="search-engine-option" data-engine="qwant" onclick="selectSearchEngine('qwant', '🔍', 'Qwant')">
+                <div class="search-engine-option-icon">🔍</div>
+                <div class="search-engine-option-name">Qwant</div>
+            </div>
+            <div class="search-engine-option" data-engine="duckduckgo" onclick="selectSearchEngine('duckduckgo', '🦆', 'DuckDuckGo')">
+                <div class="search-engine-option-icon">🦆</div>
+                <div class="search-engine-option-name">DuckDuckGo</div>
+            </div>
+            <div class="search-engine-option" data-engine="google" onclick="selectSearchEngine('google', '🔎', 'Google')">
+                <div class="search-engine-option-icon">🔎</div>
+                <div class="search-engine-option-name">Google</div>
+            </div>
+            <div class="search-engine-option" data-engine="startpage" onclick="selectSearchEngine('startpage', '🌐', 'Startpage')">
+                <div class="search-engine-option-icon">🌐</div>
+                <div class="search-engine-option-name">Startpage</div>
+            </div>
+            <div class="search-engine-option" data-engine="brave" onclick="selectSearchEngine('brave', '🦁', 'Brave Search')">
+                <div class="search-engine-option-icon">🦁</div>
+                <div class="search-engine-option-name">Brave Search</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Search engines configuration
+        const searchEngines = {
+            qwant: { url: 'https://www.qwant.com/?q=', icon: '🔍', name: 'Qwant' },
+            duckduckgo: { url: 'https://duckduckgo.com/?q=', icon: '🦆', name: 'DuckDuckGo' },
+            google: { url: 'https://www.google.com/search?q=', icon: '🔎', name: 'Google' },
+            startpage: { url: 'https://www.startpage.com/sp/search?query=', icon: '🌐', name: 'Startpage' },
+            brave: { url: 'https://search.brave.com/search?q=', icon: '🦁', name: 'Brave Search' }
+        };
+        
+        // Load saved search engine (from Android or localStorage)
+        function loadSearchEngine() {
+            let saved = 'qwant';
+            // Try to get from Android first
+            if (typeof Android !== 'undefined' && Android.getSearchEngine) {
+                saved = Android.getSearchEngine();
+            } else {
+                saved = localStorage.getItem('searchEngine') || 'qwant';
+            }
+            const engine = searchEngines[saved];
+            document.getElementById('searchEngineIcon').textContent = engine.icon;
+            document.getElementById('searchEngineName').textContent = engine.name;
+            // Update selected state in menu
+            document.querySelectorAll('.search-engine-option').forEach(opt => {
+                opt.classList.remove('selected');
+                if (opt.dataset.engine === saved) {
+                    opt.classList.add('selected');
+                }
+            });
+            return saved;
+        }
+        
+        // Save search engine selection (to both Android and localStorage)
+        function selectSearchEngine(engine, icon, name) {
+            // Save to Android
+            if (typeof Android !== 'undefined' && Android.setSearchEngine) {
+                Android.setSearchEngine(engine);
+            }
+            // Also save to localStorage for web compatibility
+            localStorage.setItem('searchEngine', engine);
+            document.getElementById('searchEngineIcon').textContent = icon;
+            document.getElementById('searchEngineName').textContent = name;
+            hideSearchEngineMenu();
+            // Update selected state
+            document.querySelectorAll('.search-engine-option').forEach(opt => {
+                opt.classList.remove('selected');
+                if (opt.dataset.engine === engine) {
+                    opt.classList.add('selected');
+                }
+            });
+        }
+        
+        // Show/hide search engine menu
+        function showSearchEngineMenu() {
+            document.getElementById('searchEngineMenu').classList.add('active');
+        }
+        
+        function hideSearchEngineMenu(event) {
+            if (!event || event.target.id === 'searchEngineMenu') {
+                document.getElementById('searchEngineMenu').classList.remove('active');
+            }
+        }
+        
+        // Initialize search engine on load
+        let currentSearchEngine = loadSearchEngine();
+        
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                let query = this.value;
+                if (query.startsWith('http://') || query.startsWith('https://')) {
+                    window.location.href = query;
+                } else if (query.includes('.')) {
+                    window.location.href = 'https://' + query;
+                } else {
+                    // Use selected search engine
+                    currentSearchEngine = localStorage.getItem('searchEngine') || 'qwant';
+                    const engine = searchEngines[currentSearchEngine];
+                    window.location.href = engine.url + encodeURIComponent(query);
+                }
+            }
+        });
+        
+        // Load favorites from Android
+        function loadFavorites() {
+            try {
+                let favorites = [];
+                if (typeof Android !== 'undefined' && Android.getFavorites) {
+                    const json = Android.getFavorites();
+                    favorites = JSON.parse(json || '[]');
+                }
+                return favorites;
+            } catch (e) {
+                console.error('Error loading favorites:', e);
+                return [];
+            }
+        }
+        
+        // Swipe handling for favorites
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let currentSwipeItem = null;
+        
+        function handleTouchStart(e, itemId) {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            currentSwipeItem = itemId;
+        }
+        
+        function handleTouchMove(e, itemId) {
+            if (currentSwipeItem !== itemId) return;
+            
+            const touchX = e.touches[0].clientX;
+            const touchY = e.touches[0].clientY;
+            const deltaX = touchX - touchStartX;
+            const deltaY = touchY - touchStartY;
+            
+            // Only handle horizontal swipes
+            if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+                e.preventDefault();
+                const item = document.getElementById(`favorite-${itemId}`);
+                const content = item.querySelector('.favorite-item-content');
+                const swipeAmount = Math.max(-80, Math.min(0, deltaX));
+                content.style.transform = `translateX(${swipeAmount}px)`;
+            }
+        }
+        
+        function handleTouchEnd(e, itemId) {
+            if (currentSwipeItem !== itemId) return;
+            
+            const touchX = e.changedTouches[0].clientX;
+            const deltaX = touchX - touchStartX;
+            
+            const item = document.getElementById(`favorite-${itemId}`);
+            
+            if (deltaX < -50) {
+                // Swiped left enough - show delete
+                item.classList.add('swiped');
+            } else {
+                // Not enough swipe or swiped right - reset
+                item.classList.remove('swiped');
+                const content = item.querySelector('.favorite-item-content');
+                content.style.transform = '';
+            }
+            
+            currentSwipeItem = null;
+        }
+        
+        function handleFavoriteClick(id, url) {
+            const item = document.getElementById(`favorite-${id}`);
+            // Only navigate if not swiped
+            if (!item.classList.contains('swiped')) {
+                window.location.href = url;
+            } else {
+                // Reset swipe on click
+                item.classList.remove('swiped');
+                const content = item.querySelector('.favorite-item-content');
+                content.style.transform = '';
+            }
+        }
+        
+        function deleteFavorite(id) {
+            if (typeof Android !== 'undefined' && Android.deleteFavorite) {
+                const deleted = Android.deleteFavorite(id);
+                if (deleted) {
+                    // Remove the item with animation
+                    const item = document.getElementById(`favorite-${id}`);
+                    item.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+                    item.style.transform = 'translateX(-100%)';
+                    item.style.opacity = '0';
+                    setTimeout(() => {
+                        // Reload favorites
+                        showFavoritesMenu();
+                    }, 300);
+                }
+            }
+        }
+        
+        // Show favorites menu
+        function showFavoritesMenu() {
+            const favorites = loadFavorites();
+            const container = document.getElementById('favoritesList');
+            
+            if (favorites.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">No favorites yet. Star a page to add it here!</p>';
+            } else {
+                container.innerHTML = favorites.map(fav => `
+                    <div class="favorite-item" id="favorite-${fav.id}">
+                        <div class="favorite-item-content search-engine-option" onclick="handleFavoriteClick(${fav.id}, '${fav.url.replace(/'/g, "\\'")}')">
+                            <div class="search-engine-option-icon">${fav.favicon || '⭐'}</div>
+                            <div class="favorite-item-info">
+                                <div class="favorite-item-title">${fav.title}</div>
+                                <div class="favorite-item-url">${fav.url}</div>
+                            </div>
+                        </div>
+                        <div class="favorite-item-delete" onclick="deleteFavorite(${fav.id})">Delete</div>
+                    </div>
+                `).join('');
+                
+                // Add touch event listeners
+                favorites.forEach(fav => {
+                    const item = document.getElementById(`favorite-${fav.id}`);
+                    item.addEventListener('touchstart', (e) => handleTouchStart(e, fav.id), { passive: false });
+                    item.addEventListener('touchmove', (e) => handleTouchMove(e, fav.id), { passive: false });
+                    item.addEventListener('touchend', (e) => handleTouchEnd(e, fav.id), { passive: true });
+                });
+            }
+            
+            document.getElementById('favoritesMenu').classList.add('active');
+        }
+        
+        function hideFavoritesMenu(event) {
+            if (!event || event.target.id === 'favoritesMenu') {
+                document.getElementById('favoritesMenu').classList.remove('active');
+            }
+        }
+        
+        // Load recent history from Android
+        function loadRecentTabs() {
+            try {
+                let history = [];
+                if (typeof Android !== 'undefined' && Android.getRecentHistory) {
+                    const json = Android.getRecentHistory();
+                    history = JSON.parse(json || '[]');
+                }
+                
+                const container = document.getElementById('recentTabsList');
+                
+                if (history.length === 0) {
+                    container.innerHTML = '<p style="color: white; text-align: center;">No recent history</p>';
+                    return;
+                }
+                
+                container.innerHTML = history.map(tab => `
+                    <div class="tab-item" onclick="window.location.href='${tab.url}'">
+                        <div class="tab-favicon">🌐</div>
+                        <div class="tab-info">
+                            <div class="tab-title">${tab.title}</div>
+                            <div class="tab-url">${tab.url}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Error loading history:', e);
+                document.getElementById('recentTabsList').innerHTML = '<p style="color: white; text-align: center;">Error loading history</p>';
+            }
+        }
+        
+        loadRecentTabs();
+    </script>
+</body>
+</html>
