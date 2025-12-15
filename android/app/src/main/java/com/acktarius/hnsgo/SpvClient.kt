@@ -48,6 +48,10 @@ object SpvClient {
     private var chainHeight: Int = 0
     private var firstInMemoryHeight: Int = 0
     private var lastNetworkHeight: Int? = null
+    private var lastSavedHeight: Int = 0  // Track the last height that was actually saved to disk
+    
+    @Volatile
+    private var initialized = false  // Prevent multiple init() calls
     
     /**
      * DEVELOPMENT ONLY: Configure external Handshake resolver for testing/comparison
@@ -82,7 +86,8 @@ object SpvClient {
                 }
             }
             
-            HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, firstInMemoryHeight)
+            HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, lastSavedHeight, force = true)
+            lastSavedHeight = chainHeight  // Update after checkpoint bootstrap save
         } else {
             android.util.Log.w("HNSGo", "SpvClient: Checkpoint bootstrap failed - no headers loaded")
             android.util.Log.w("HNSGo", "SpvClient: Cannot sync from genesis (block 0) - checkpoint required for bootstrap")
@@ -135,7 +140,21 @@ object SpvClient {
                         maxOf(Config.CHECKPOINT_HEIGHT, chainHeight - headerChain.size + 1)
                     }
                 }
-                HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, currentFirstInMemory)
+                // Force save on checkpoint boundaries to ensure progress is saved
+                // Check if we're at a checkpoint boundary OR if lastSavedHeight is behind the current checkpoint boundary
+                // This handles the case where checkpoint save was triggered but chainHeight advanced before save executed
+                val currentCheckpoint = (chainHeight / Config.HEADER_SAVE_CHECKPOINT_WINDOW) * Config.HEADER_SAVE_CHECKPOINT_WINDOW
+                val lastSavedCheckpoint = (lastSavedHeight / Config.HEADER_SAVE_CHECKPOINT_WINDOW) * Config.HEADER_SAVE_CHECKPOINT_WINDOW
+                val isCheckpointSave = (chainHeight % Config.HEADER_SAVE_CHECKPOINT_WINDOW == 0) || (currentCheckpoint > lastSavedCheckpoint)
+                android.util.Log.d("HNSGo", "SpvClient: saveHeaders called - chainHeight=$chainHeight, lastSavedHeight=$lastSavedHeight, currentCheckpoint=$currentCheckpoint, lastSavedCheckpoint=$lastSavedCheckpoint, isCheckpointSave=$isCheckpointSave")
+                val saveSucceeded = HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, lastSavedHeight, force = isCheckpointSave)
+                if (saveSucceeded) {
+                    // Only update lastSavedHeight if save actually succeeded
+                    lastSavedHeight = chainHeight
+                    android.util.Log.d("HNSGo", "SpvClient: Updated lastSavedHeight to $chainHeight after successful save")
+                } else {
+                    android.util.Log.w("HNSGo", "SpvClient: Save was skipped or failed, not updating lastSavedHeight")
+                }
                 Unit
             },
             knownNetworkHeight = lastNetworkHeight  // Pass known network height to reject headers ahead of it (matching hnsd behavior)
@@ -169,6 +188,13 @@ object SpvClient {
     }
     
     suspend fun init(dir: File, context: android.content.Context) {
+        // Prevent multiple initializations (both MainActivity and DohService call init)
+        if (initialized) {
+            android.util.Log.d("HNSGo", "SpvClient: Already initialized, skipping")
+            return
+        }
+        initialized = true
+        
         dataDir = dir
         
         Checkpoint.init(context)
@@ -178,6 +204,7 @@ object SpvClient {
         )
         chainHeight = loadedHeight
         firstInMemoryHeight = loadedFirstInMemory
+        lastSavedHeight = loadedHeight  // Initialize lastSavedHeight to the loaded height
         
         // Initialize HashSet for O(1) duplicate detection (matching hnsd's approach)
         if (headerChain.isNotEmpty()) {
@@ -229,7 +256,22 @@ object SpvClient {
                         maxOf(Config.CHECKPOINT_HEIGHT, chainHeight - headerChain.size + 1)
                     }
                 }
-                HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, currentFirstInMemory)
+                // Force save on checkpoint boundaries to ensure progress is saved
+                // Check if we're at a checkpoint boundary OR if lastSavedHeight is behind the current checkpoint boundary
+                val currentCheckpoint = (chainHeight / Config.HEADER_SAVE_CHECKPOINT_WINDOW) * Config.HEADER_SAVE_CHECKPOINT_WINDOW
+                val lastSavedCheckpoint = (lastSavedHeight / Config.HEADER_SAVE_CHECKPOINT_WINDOW) * Config.HEADER_SAVE_CHECKPOINT_WINDOW
+                val isCheckpointSave = (chainHeight % Config.HEADER_SAVE_CHECKPOINT_WINDOW == 0) || (currentCheckpoint > lastSavedCheckpoint)
+                android.util.Log.d("HNSGo", "SpvClient: continueSync saveHeaders called - chainHeight=$chainHeight, lastSavedHeight=$lastSavedHeight, currentCheckpoint=$currentCheckpoint, lastSavedCheckpoint=$lastSavedCheckpoint, isCheckpointSave=$isCheckpointSave")
+                // Capture chainHeight at save time to avoid race condition (chainHeight may advance during save)
+                val heightAtSaveTime = chainHeight
+                val saveSucceeded = HeaderStorage.saveHeaderChain(dataDir, headerChain, heightAtSaveTime, lastSavedHeight, force = isCheckpointSave)
+                if (saveSucceeded) {
+                    // Only update lastSavedHeight to the height we actually saved (not current chainHeight which may have advanced)
+                    lastSavedHeight = heightAtSaveTime
+                    android.util.Log.d("HNSGo", "SpvClient: Updated lastSavedHeight to $heightAtSaveTime after successful save (current chainHeight=$chainHeight)")
+                } else {
+                    android.util.Log.w("HNSGo", "SpvClient: Save was skipped or failed, not updating lastSavedHeight")
+                }
                 Unit
             }
         )
@@ -253,8 +295,13 @@ object SpvClient {
                 maxOf(Config.CHECKPOINT_HEIGHT, chainHeight - headerChain.size + 1)
             }
         }
-        HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, currentFirstInMemory, force = true)
-        android.util.Log.d("HNSGo", "SpvClient: Force saved headers at height $chainHeight")
+        val saveSucceeded = HeaderStorage.saveHeaderChain(dataDir, headerChain, chainHeight, lastSavedHeight, force = true)
+        if (saveSucceeded) {
+            lastSavedHeight = chainHeight  // Update lastSavedHeight after successful force save
+            android.util.Log.d("HNSGo", "SpvClient: Force saved headers at height $chainHeight")
+        } else {
+            android.util.Log.w("HNSGo", "SpvClient: Force save was skipped or failed at height $chainHeight")
+        }
     }
     
     /**

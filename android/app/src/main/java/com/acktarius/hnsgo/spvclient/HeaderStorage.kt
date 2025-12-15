@@ -118,7 +118,7 @@ object HeaderStorage {
         chainHeight: Int,
         lastSavedHeight: Int = 0,
         force: Boolean = false
-    ) = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             val headersFile = File(dataDir, Config.HEADERS_FILE)
             val incrementalFile = File(dataDir, "${Config.HEADERS_FILE}.incremental")
@@ -126,15 +126,17 @@ object HeaderStorage {
             
             val newHeadersCount = chainHeight - lastSavedHeight
             if (!force && newHeadersCount <= 0) {
-                return@withContext
+                android.util.Log.d("HNSGo", "HeaderStorage: Skipping save - no new headers (chainHeight=$chainHeight, lastSavedHeight=$lastSavedHeight)")
+                return@withContext false
             }
+            android.util.Log.d("HNSGo", "HeaderStorage: Saving headers - chainHeight=$chainHeight, lastSavedHeight=$lastSavedHeight, newHeaders=$newHeadersCount, force=$force")
             
             // MATCHING hnsd: Only save the latest 150 headers (HSK_STORE_HEADERS_COUNT)
             // This prevents OOM and matches hnsd's behavior - SPV clients don't need all historical headers
             synchronized(headerChain) {
                 if (headerChain.isEmpty()) {
                     android.util.Log.w("HNSGo", "HeaderStorage: No headers in memory to save")
-                    return@withContext
+                    return@withContext false
                 }
                 
                 // Save only the latest 150 headers (matching hnsd's HSK_STORE_HEADERS_COUNT)
@@ -142,7 +144,7 @@ object HeaderStorage {
                 
                 if (headersToSave.isEmpty()) {
                     android.util.Log.w("HNSGo", "HeaderStorage: No headers to save after filtering")
-                    return@withContext
+                    return@withContext false
                 }
                 
                 // Create new array with only latest 150 headers (don't append - replace)
@@ -169,11 +171,16 @@ object HeaderStorage {
                 if (incrementalFile.exists()) {
                     incrementalFile.delete()
                 }
+                
+                android.util.Log.d("HNSGo", "HeaderStorage: Successfully saved headers at height $chainHeight")
+                return@withContext true
             }
         } catch (e: OutOfMemoryError) {
             android.util.Log.e("HNSGo", "HeaderStorage: OutOfMemoryError saving headers - skipping save", e)
+            return@withContext false
         } catch (e: Exception) {
             android.util.Log.e("HNSGo", "HeaderStorage: Error saving header chain", e)
+            return@withContext false
         }
     }
     

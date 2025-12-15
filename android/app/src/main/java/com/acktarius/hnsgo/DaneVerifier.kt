@@ -310,16 +310,45 @@ object DaneVerifier {
     
     /**
      * Resolve hostname to IP address, using Handshake resolver for Handshake domains
+     * Checks cache first before querying blockchain
      */
     private suspend fun resolveHostToIP(host: String): String? = withContext(Dispatchers.IO) {
         try {
-            // Try Handshake resolution first
-            val dnsMessage = RecursiveResolver.resolve(host, Type.A)
+            val aType = Type.A
+            val aClass = DClass.IN
+            
+            // Step 1: Check cache first
+            val currentHeight = SpvClient.getChainHeight()
+            val cached = CacheManager.get(host, aType, aClass, currentHeight)
+            if (cached != null) {
+                try {
+                    val cachedMessage = Message(cached)
+                    val answers = cachedMessage.getSection(Section.ANSWER)
+                    val aRecords = answers.filterIsInstance<ARecord>()
+                    if (aRecords.isNotEmpty()) {
+                        val ip = aRecords[0].address.hostAddress
+                        Log.d("DaneVerifier", "Resolved $host -> $ip (from cache)")
+                        return@withContext ip
+                    }
+                } catch (e: Exception) {
+                    // Corrupted cache entry, remove it and continue
+                    CacheManager.remove(host, aType, aClass)
+                }
+            }
+            
+            // Step 2: Cache miss - resolve from blockchain
+            val dnsMessage = RecursiveResolver.resolve(host, aType)
             if (dnsMessage != null) {
                 val answers = dnsMessage.getSection(Section.ANSWER)
                 val aRecords = answers.filterIsInstance<ARecord>()
                 if (aRecords.isNotEmpty()) {
                     val ip = aRecords[0].address.hostAddress
+                    
+                    // Step 3: Cache the result
+                    val ttl = answers.minOfOrNull { it.ttl }?.toInt() ?: Config.DNS_CACHE_TTL_SECONDS
+                    CacheManager.put(host, aType, aClass, dnsMessage.toWire(), ttl, currentHeight)
+                    
+                    Log.d("DaneVerifier", "Resolved $host -> $ip (from blockchain, cached)")
                     return@withContext ip
                 }
             }
