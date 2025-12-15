@@ -42,6 +42,9 @@ object CacheManager {
             // Reset counter for new 36-block window
             rec.accessCount36Blocks = 0
             rec.lastCountResetHeight = currentHeight
+            // Note: expiryTimestamp is intentionally NOT updated here
+            // - If entry is expired, cleanupExpiredEntries() will handle it (remove if <=2, prefetch if >2)
+            // - If entry is not expired, we want to keep the original TTL expiry time
         }
         
         // Increment access count and update last access height

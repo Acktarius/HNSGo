@@ -604,8 +604,9 @@ fun WebViewBrowser(
                                                         )
                                                         dao.insertHistory(history)
                                                     } else {
-                                                        // Update existing entry timestamp to move it to top
+                                                        // Update existing entry timestamp, title, and favicon to move it to top
                                                         val updated = existing.copy(
+                                                            title = pageTitle, // Update title (may be "Loading..." but will be corrected in onPageFinished)
                                                             visitedAt = System.currentTimeMillis(),
                                                             favicon = favicon ?: existing.favicon // Keep existing favicon if new one not available
                                                         )
