@@ -46,6 +46,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -80,6 +81,7 @@ fun WebViewBrowser(
     }
     
     val homeUrl = "file:///android_asset/webviewer/home.html"
+    val primaryPurple = Color(0xFF6200EE) // Primary purple color
     
     /**
      * Get search URL for the selected search engine
@@ -128,7 +130,8 @@ fun WebViewBrowser(
                 Icon(
                     Icons.Default.ArrowBack,
                     contentDescription = "Back",
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(20.dp),
+                    tint = primaryPurple
                 )
             }
             
@@ -140,7 +143,8 @@ fun WebViewBrowser(
                 Icon(
                     Icons.Default.ArrowForward,
                     contentDescription = "Forward",
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(20.dp),
+                    tint = primaryPurple
                 )
             }
             
@@ -151,7 +155,8 @@ fun WebViewBrowser(
                 Icon(
                     Icons.Default.Refresh,
                     contentDescription = "Refresh",
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(20.dp),
+                    tint = primaryPurple
                 )
             }
             
@@ -166,7 +171,8 @@ fun WebViewBrowser(
                 Icon(
                     Icons.Default.SwapHoriz,
                     contentDescription = "Switch to Geek Mode",
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(20.dp),
+                    tint = primaryPurple
                 )
             }
             
@@ -190,7 +196,8 @@ fun WebViewBrowser(
                 Icon(
                     Icons.Default.Star,
                     contentDescription = "Add to favorites",
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(20.dp),
+                    tint = primaryPurple
                 )
             }
             
@@ -203,7 +210,8 @@ fun WebViewBrowser(
                 Icon(
                     Icons.Default.Home,
                     contentDescription = "Home",
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(20.dp),
+                    tint = primaryPurple
                 )
             }
         }

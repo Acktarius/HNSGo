@@ -266,9 +266,9 @@
                     <div class="favorite-item" id="favorite-${fav.id}">
                         <div class="favorite-item-content search-engine-option" onclick="handleFavoriteClick(${fav.id}, '${fav.url.replace(/'/g, "\\'")}')">
                             <div class="search-engine-option-icon">${fav.favicon || '⭐'}</div>
-                            <div class="search-engine-option-name" style="flex: 1;">
-                                <div style="font-weight: 600;">${fav.title}</div>
-                                <div style="font-size: 12px; color: #666; margin-top: 4px;">${fav.url}</div>
+                            <div class="favorite-item-info">
+                                <div class="favorite-item-title">${fav.title}</div>
+                                <div class="favorite-item-url">${fav.url}</div>
                             </div>
                         </div>
                         <div class="favorite-item-delete" onclick="deleteFavorite(${fav.id})">Delete</div>
