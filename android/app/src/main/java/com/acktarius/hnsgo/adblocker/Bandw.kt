@@ -15,7 +15,7 @@ object Bandw {
      */
     private val WHITELIST = setOf(
         "home.conceal",
-        "dweb.conceal",
+        "website.conceal",
         "conceal.network",
         "localhost.localdomain",
         "local"

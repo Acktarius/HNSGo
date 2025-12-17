@@ -375,7 +375,7 @@ fun WebViewBrowser(
                             
                             @android.webkit.JavascriptInterface
                             fun deleteFavorite(id: Long): Boolean {
-                                return runBlocking {
+                                return runBlocking(Dispatchers.IO) {
                                     try {
                                         val favorites = dao.getAllFavoritesList()
                                         val favorite = favorites.find { it.id == id }
@@ -386,6 +386,7 @@ fun WebViewBrowser(
                                             false
                                         }
                                     } catch (e: Exception) {
+                                        android.util.Log.e("WebViewBrowser", "Error deleting favorite: ${e.message}", e)
                                         false
                                     }
                                 }

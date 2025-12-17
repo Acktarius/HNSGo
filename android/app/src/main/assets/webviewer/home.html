@@ -272,17 +272,20 @@
                 event.preventDefault();
             }
             if (typeof Android !== 'undefined' && Android.deleteFavorite) {
-                const deleted = Android.deleteFavorite(id);
+                const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
+                const deleted = Android.deleteFavorite(numericId);
                 if (deleted) {
-                    // Remove the item with animation
                     const item = document.getElementById(`favorite-${id}`);
-                    item.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
-                    item.style.transform = 'translateX(-100%)';
-                    item.style.opacity = '0';
-                    setTimeout(() => {
-                        // Reload favorites
+                    if (item) {
+                        item.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+                        item.style.transform = 'translateX(-100%)';
+                        item.style.opacity = '0';
+                        setTimeout(() => {
+                            showFavoritesMenu();
+                        }, 300);
+                    } else {
                         showFavoritesMenu();
-                    }, 300);
+                    }
                 }
             }
         }

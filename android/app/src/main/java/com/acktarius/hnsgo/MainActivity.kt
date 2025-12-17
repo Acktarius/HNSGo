@@ -561,7 +561,7 @@ fun HnsGoScreen(act: MainActivity) {
                         onValueChange = { daneUrl = it },
                         label = {
                             Text(
-                                "URL (e.g., https://dweb.conceal/)",
+                                "URL (e.g., https://website.conceal/)",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = typewriterFont,
                                     fontSize = 11.sp
