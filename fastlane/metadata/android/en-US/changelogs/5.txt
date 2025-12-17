@@ -1,0 +1,2 @@
+- fix bug when deleting favorite
+- update links

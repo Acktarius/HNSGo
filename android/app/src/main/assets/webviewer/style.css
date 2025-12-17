@@ -295,6 +295,11 @@ h1 {
     z-index: 1;
     border-radius: 0 10px 10px 0;
     pointer-events: none;
+    cursor: pointer;
+}
+
+.favorite-item.swiped .favorite-item-delete {
+    pointer-events: auto;
 }
 
 /* Custom Dialog Styles */

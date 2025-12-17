@@ -39,7 +39,7 @@
                 </div>
                 <div class="shortcut-name">Namebase</div>
             </a>
-            <a href="https://dweb.conceal/" class="shortcut">
+            <a href="https://website.conceal/" class="shortcut">
                 <div class="shortcut-icon">
                     <img src="icons/logo-conceal.svg" alt="Conceal Network" class="shortcut-icon-img shortcut-icon-conceal">
                 </div>
@@ -266,7 +266,11 @@
             }
         }
         
-        function deleteFavorite(id) {
+        function deleteFavorite(id, event) {
+            if (event) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
             if (typeof Android !== 'undefined' && Android.deleteFavorite) {
                 const deleted = Android.deleteFavorite(id);
                 if (deleted) {
@@ -300,7 +304,7 @@
                                 <div class="favorite-item-url">${fav.url}</div>
                             </div>
                         </div>
-                        <div class="favorite-item-delete" onclick="deleteFavorite(${fav.id})">Delete</div>
+                        <div class="favorite-item-delete" onclick="deleteFavorite(${fav.id}, event)">Delete</div>
                     </div>
                 `).join('');
                 
