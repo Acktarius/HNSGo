@@ -1,0 +1,2 @@
+- fix only clear history on user trigger
+- improve RSS compatibility

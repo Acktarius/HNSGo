@@ -18,24 +18,57 @@ object InterceptRss {
     /**
      * Check if a response is an RSS/Atom feed based on MIME type or content
      */
-    fun isRssFeed(mimeType: String, bodyBytes: ByteArray?): Boolean {
-        // Check MIME type
-        val mimeLower = mimeType.lowercase()
-        if (mimeLower.contains("rss") || 
-            mimeLower.contains("atom") ||
-            mimeLower == "application/xml" ||
-            mimeLower == "text/xml") {
-            
-            // For XML types, check content to confirm it's actually RSS/Atom
-            if (bodyBytes != null && bodyBytes.isNotEmpty()) {
-                val content = String(bodyBytes, StandardCharsets.UTF_8).lowercase()
-                return content.contains("<rss") || 
-                       content.contains("<feed") ||
-                       content.contains("xmlns=\"http://www.w3.org/2005/atom\"")
+    fun isRssFeed(mimeType: String, bodyBytes: ByteArray?, url: String? = null): Boolean {
+        // Check URL pattern first (fast check) - be more specific to avoid false positives
+        url?.let {
+            val urlLower = it.lowercase()
+            // Check for RSS/feed/atom in the path (after domain), not in domain name
+            val urlPath = try {
+                val uri = java.net.URI(urlLower)
+                uri.path ?: ""
+            } catch (e: Exception) {
+                // Fallback: extract path manually
+                val pathStart = urlLower.indexOf('/', urlLower.indexOf("://") + 3)
+                if (pathStart >= 0) urlLower.substring(pathStart) else ""
             }
-            return true
+            
+            // Check path for RSS indicators (not domain name) - only if path exists
+            if (urlPath.isNotEmpty() && (
+                urlPath.contains("/rss") || 
+                urlPath.contains("/feed") || 
+                urlPath.contains("/atom") ||
+                urlPath.endsWith(".rss") ||
+                (urlPath.endsWith(".xml") && (urlPath.contains("rss") || urlPath.contains("feed")))
+            )) {
+                return true
+            }
         }
-        return false
+        
+        // Always check content if available (more reliable than MIME type)
+        if (bodyBytes != null && bodyBytes.isNotEmpty()) {
+            try {
+                val content = String(bodyBytes, StandardCharsets.UTF_8)
+                val contentLower = content.lowercase()
+                // Check for RSS/Atom XML structure in content
+                if (contentLower.contains("<rss") || 
+                    contentLower.contains("<feed") ||
+                    contentLower.contains("xmlns=\"http://www.w3.org/2005/atom\"") ||
+                    (contentLower.trimStart().startsWith("<?xml") && 
+                     (contentLower.contains("<channel") || contentLower.contains("<entry")))) {
+                    return true
+                }
+            } catch (e: Exception) {
+                // If content parsing fails, fall through to MIME type check
+                android.util.Log.e(TAG, "Error parsing content for RSS detection: ${e.message}", e)
+            }
+        }
+        
+        // Also check MIME type as fallback
+        val mimeLower = mimeType.lowercase()
+        return mimeLower.contains("rss") || 
+               mimeLower.contains("atom") ||
+               mimeLower == "application/xml" ||
+               mimeLower == "text/xml"
     }
     
     /**
@@ -45,12 +78,18 @@ object InterceptRss {
         val feedContent = String(bodyBytes, StandardCharsets.UTF_8)
         val html = generateFeedViewerHtml(feedContent, feedUrl)
         
+        // Headers that prevent download and ensure HTML rendering
+        val headers = mapOf(
+            "Content-Type" to "text/html; charset=UTF-8",
+            "Content-Disposition" to "inline" // Prevent download, force inline display
+        )
+        
         return WebResourceResponse(
             "text/html",
             "UTF-8",
             200,
             "OK",
-            mapOf("Content-Type" to "text/html; charset=UTF-8"),
+            headers,
             ByteArrayInputStream(html.toByteArray(StandardCharsets.UTF_8))
         )
     }
@@ -161,18 +200,22 @@ object InterceptRss {
      * Extract feed title from RSS/Atom content
      */
     private fun extractFeedTitle(content: String): String {
-        // Try RSS format
-        val rssTitle = Regex("<title[^>]*>(.*?)</title>", RegexOption.DOT_MATCHES_ALL)
-            .find(content)?.groupValues?.get(1)?.trim()
-        if (!rssTitle.isNullOrEmpty()) {
-            return rssTitle.replace(Regex("<[^>]+>"), "").trim()
+        // Try RSS format - look for channel title specifically
+        val channelPattern = Regex("<channel[^>]*>(.*?)</channel>", RegexOption.DOT_MATCHES_ALL)
+        val channelMatch = channelPattern.find(content)
+        if (channelMatch != null) {
+            val channelContent = channelMatch.groupValues[1]
+            val rssTitle = extractTagContent(channelContent, "title")
+            if (!rssTitle.isNullOrEmpty()) {
+                return rssTitle.replace(Regex("<[^>]+>"), "").trim()
+            }
         }
         
-        // Try Atom format
-        val atomTitle = Regex("<title[^>]*>(.*?)</title>", RegexOption.DOT_MATCHES_ALL)
+        // Fallback: try any title tag (for malformed RSS or Atom)
+        val anyTitle = Regex("<title[^>]*>(.*?)</title>", RegexOption.DOT_MATCHES_ALL)
             .find(content)?.groupValues?.get(1)?.trim()
-        if (!atomTitle.isNullOrEmpty()) {
-            return atomTitle.replace(Regex("<[^>]+>"), "").trim()
+        if (!anyTitle.isNullOrEmpty()) {
+            return anyTitle.replace(Regex("<[^>]+>"), "").trim()
         }
         
         return "RSS Feed"

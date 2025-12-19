@@ -279,9 +279,13 @@ class WebViewDnsInterceptor {
             val bodyBytes = body?.bytes() ?: ByteArray(0)
             
             // Check if this is an RSS/Atom feed and convert to HTML viewer
-            if (InterceptRss.isRssFeed(mimeType, bodyBytes)) {
-                val feedUrl = uri.toString()
-                return InterceptRss.convertFeedToHtml(bodyBytes, feedUrl)
+            // Use request URL to ensure we have the original URL
+            val requestUrl = request.url.toString()
+            val feedUrl = uri.toString()
+            val urlToCheck = requestUrl.ifEmpty { feedUrl }
+            
+            if (InterceptRss.isRssFeed(mimeType, bodyBytes, urlToCheck)) {
+                return InterceptRss.convertFeedToHtml(bodyBytes, urlToCheck)
             }
             
             WebResourceResponse(

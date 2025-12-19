@@ -26,8 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
@@ -167,7 +167,7 @@ fun WebViewBrowser(
                 glowColor = primaryPurple
             ) {
                 Icon(
-                    Icons.Default.ArrowBack,
+                    Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
                     modifier = Modifier.size(20.dp),
                     tint = primaryPurple
@@ -180,7 +180,7 @@ fun WebViewBrowser(
                 glowColor = primaryPurple
             ) {
                 Icon(
-                    Icons.Default.ArrowForward,
+                    Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = "Forward",
                     modifier = Modifier.size(20.dp),
                     tint = primaryPurple
@@ -486,10 +486,13 @@ fun WebViewBrowser(
                             @android.webkit.JavascriptInterface
                             fun clearCookiesAndHistory(): Boolean {
                                 return try {
-                                    BrowserPrivacyUtils.clearAllPrivacyDataSync(
-                                        webView = webViewState,
-                                        dao = dao
-                                    )
+                                    // Use the async function that properly clears database history
+                                    runBlocking {
+                                        BrowserPrivacyUtils.clearCookiesAndHistory(
+                                            webView = webViewState,
+                                            dao = dao
+                                        )
+                                    }
                                     true
                                 } catch (e: Exception) {
                                     android.util.Log.e("WebViewBrowser", "Error clearing data: ${e.message}", e)
@@ -503,6 +506,48 @@ fun WebViewBrowser(
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ): Boolean {
+                                // Check if this is an RSS feed URL - intercept it to prevent download
+                                request?.url?.toString()?.let { url ->
+                                    val urlLower = url.lowercase()
+                                    val urlPath = try {
+                                        val uri = java.net.URI(urlLower)
+                                        uri.path ?: ""
+                                    } catch (e: Exception) {
+                                        val pathStart = urlLower.indexOf('/', urlLower.indexOf("://") + 3)
+                                        if (pathStart >= 0) urlLower.substring(pathStart) else ""
+                                    }
+                                    
+                                    // If it's an RSS feed URL, manually intercept and load through our interceptor
+                                    if (urlPath.isNotEmpty() && (
+                                        urlPath.contains("/rss") || 
+                                        urlPath.contains("/feed") || 
+                                        urlPath.contains("/atom") ||
+                                        urlPath.endsWith(".rss") ||
+                                        (urlPath.endsWith(".xml") && (urlPath.contains("rss") || urlPath.contains("feed")))
+                                    )) {
+                                        // Manually intercept the RSS feed
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val response = dnsInterceptor.interceptRequest(request)
+                                                if (response != null) {
+                                                    // Read the HTML response
+                                                    val htmlBytes = response.data.readBytes()
+                                                    val html = String(htmlBytes, Charsets.UTF_8)
+                                                    
+                                                    // Load the HTML on main thread
+                                                    withContext(Dispatchers.Main) {
+                                                        view?.loadDataWithBaseURL(url, html, "text/html", "UTF-8", null)
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("WebViewBrowser", "Error intercepting RSS feed: ${e.message}", e)
+                                            }
+                                        }
+                                        // Return true to tell WebView we're handling this
+                                        return true
+                                    }
+                                }
+                                
                                 // Allow all navigation - don't block same-origin or fragment changes
                                 // This is critical for JavaScript navigation and in-page links
                                 return false // Let WebView handle the navigation
@@ -817,18 +862,12 @@ fun WebViewBrowser(
     
     DisposableEffect(Unit) {
         onDispose {
-            // Privacy: Clear all cookies and data when browser is closed
-            // Fast non-blocking clear, then destroy WebView immediately
+            // Privacy: Clear cookies and cache when browser is closed (preserves history)
             BrowserPrivacyUtils.clearAllPrivacyDataSync(
                 webView = webViewState,
                 dao = null // Skip database in sync version to prevent ANR
             )
             webViewState?.destroy()
-            
-            // Clear database asynchronously (non-blocking)
-            scope.launch(Dispatchers.IO) {
-                dao.clearHistory()
-            }
         }
     }
 }

@@ -135,7 +135,6 @@ object BrowserPrivacyUtils {
             // Clear WebView data (must be on main thread, but we're already there)
             webView?.let { view ->
                 view.clearCache(true)
-                view.clearHistory()
                 view.clearFormData()
             }
             
