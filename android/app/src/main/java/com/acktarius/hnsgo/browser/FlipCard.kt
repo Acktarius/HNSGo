@@ -1,6 +1,6 @@
 package com.acktarius.hnsgo.browser
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,15 +10,9 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 
 /**
  * Flip card composable that animates between two content views
@@ -37,42 +31,17 @@ fun FlipCard(
     modifier: Modifier = Modifier,
     showSwitchButton: Boolean = true
 ) {
-    val animatedRotationY by animateFloatAsState(
-        targetValue = if (isFlipped) 180f else 0f,
-        animationSpec = tween(durationMillis = 300),
-        label = "flipRotation"
-    )
-    
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    
     Box(modifier = modifier.fillMaxSize()) {
-        // Front card (Regular Mode)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    rotationY = animatedRotationY
-                    cameraDistance = 8f * density.density
-                }
-                .zIndex(if (animatedRotationY < 90f) 1f else 0f)
-        ) {
-            if (animatedRotationY < 90f) {
-                frontContent()
-            }
-        }
-        
-        // Back card (Lazy Mode)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    rotationY = animatedRotationY + 180f
-                    cameraDistance = 8f * density.density
-                }
-                .zIndex(if (animatedRotationY >= 90f) 1f else 0f)
-        ) {
-            if (animatedRotationY >= 90f) {
+        // Crossfade animation - CPU-efficient opacity transition
+        Crossfade(
+            targetState = isFlipped,
+            animationSpec = tween(durationMillis = 300),
+            label = "flipTransition"
+        ) { flipped ->
+            if (flipped) {
                 backContent()
+            } else {
+                frontContent()
             }
         }
         

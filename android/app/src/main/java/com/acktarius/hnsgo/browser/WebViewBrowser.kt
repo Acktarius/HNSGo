@@ -37,8 +37,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.acktarius.hnsgo.browser.BrowserDatabase
+import com.acktarius.hnsgo.browser.utils.BrowserPrivacyUtils
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -71,6 +75,13 @@ fun WebViewBrowser(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    // Wait for flip animation to complete (300ms) before initializing WebView
+    var shouldCreateWebView by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(50) // Wait for flip card animation to complete
+        shouldCreateWebView = true
+    }
     
     var webViewState by remember { mutableStateOf<WebView?>(null) }
     var url by remember { mutableStateOf("") }
@@ -90,7 +101,7 @@ fun WebViewBrowser(
     }
     
     val homeUrl = "file:///android_asset/webviewer/home.html"
-    val primaryPurple = Color(0xFF6200EE) // Primary purple color
+    val primaryPurple = Color(0xFFBB86FC) // Primary purple color
     
     /**
      * Get search URL for the selected search engine
@@ -106,6 +117,26 @@ fun WebViewBrowser(
             else -> "https://duckduckgo.com/?q=$encodedQuery"
         }
     }
+    
+    /**
+     * Navigate to URL or search based on input
+     */
+    fun navigateToInput() {
+        isEditingUrl = false  // Done editing, navigating
+        val input = urlBarText.trim()
+        val finalUrl = when {
+            // Already a full URL
+            input.startsWith("http://") || 
+            input.startsWith("https://") || 
+            input.startsWith("file://") -> input
+            // Looks like a domain (contains dot, no spaces)
+            input.contains(".") && !input.contains(" ") -> "https://$input"
+            // Otherwise, search with selected search engine
+            else -> getSearchUrl(input)
+        }
+        webViewState?.loadUrl(finalUrl)
+    }
+    
     
     // Load home page when WebView is ready
     LaunchedEffect(webViewState) {
@@ -130,10 +161,10 @@ fun WebViewBrowser(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Left side: Navigation controls
-            IconButton(
+            GlowingIconButton(
                 onClick = { webViewState?.goBack() },
                 enabled = canGoBack,
-                modifier = Modifier.size(40.dp)
+                glowColor = primaryPurple
             ) {
                 Icon(
                     Icons.Default.ArrowBack,
@@ -143,10 +174,10 @@ fun WebViewBrowser(
                 )
             }
             
-            IconButton(
+            GlowingIconButton(
                 onClick = { webViewState?.goForward() },
                 enabled = canGoForward,
-                modifier = Modifier.size(40.dp)
+                glowColor = primaryPurple
             ) {
                 Icon(
                     Icons.Default.ArrowForward,
@@ -156,9 +187,9 @@ fun WebViewBrowser(
                 )
             }
             
-            IconButton(
+            GlowingIconButton(
                 onClick = { webViewState?.reload() },
-                modifier = Modifier.size(40.dp)
+                glowColor = primaryPurple
             ) {
                 Icon(
                     Icons.Default.Refresh,
@@ -172,9 +203,17 @@ fun WebViewBrowser(
             Spacer(modifier = Modifier.weight(1f))
             
             // Right side: Double arrow, Star, Home
-            IconButton(
-                onClick = onNavigateBack,
-                modifier = Modifier.size(40.dp)
+            GlowingIconButton(
+                onClick = {
+                    // Privacy: Clear all browsing data when switching to Geek Mode
+                    // KISS: Synchronous clear, then navigate back
+                    BrowserPrivacyUtils.clearAllPrivacyDataSync(
+                        webView = webViewState,
+                        dao = dao
+                    )
+                    onNavigateBack()
+                },
+                glowColor = primaryPurple
             ) {
                 Icon(
                     Icons.Default.SwapHoriz,
@@ -184,7 +223,7 @@ fun WebViewBrowser(
                 )
             }
             
-            IconButton(
+            GlowingIconButton(
                 onClick = {
                     scope.launch {
                         val favorite = dao.getHistoryByUrl(url)?.let {
@@ -199,7 +238,7 @@ fun WebViewBrowser(
                         dao.insertFavorite(favorite)
                     }
                 },
-                modifier = Modifier.size(40.dp)
+                glowColor = primaryPurple
             ) {
                 Icon(
                     Icons.Default.Star,
@@ -209,7 +248,7 @@ fun WebViewBrowser(
                 )
             }
             
-            IconButton(
+            GlowingIconButton(
                 onClick = {
                     webViewState?.loadUrl("file:///android_asset/webviewer/home.html")
                     // Refresh history when navigating to home
@@ -218,7 +257,7 @@ fun WebViewBrowser(
                         webViewState?.evaluateJavascript("if(typeof loadRecentTabs === 'function') loadRecentTabs();", null)
                     }
                 },
-                modifier = Modifier.size(40.dp)
+                glowColor = primaryPurple
             ) {
                 Icon(
                     Icons.Default.Home,
@@ -236,7 +275,7 @@ fun WebViewBrowser(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.dp),
-                color = androidx.compose.ui.graphics.Color(0xFF6200EE) // Purple primary
+                color = androidx.compose.ui.graphics.Color(0xFFBB86FC) // Purple primary
             )
         }
         
@@ -253,6 +292,14 @@ fun WebViewBrowser(
             shape = RoundedCornerShape(20.dp),
             singleLine = true,
             placeholder = { Text("Enter URL or search") },
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Go
+            ),
+            keyboardActions = KeyboardActions(
+                onGo = {
+                    navigateToInput()
+                }
+            ),
             leadingIcon = {
                 if (urlBarText.isNotEmpty()) {
                     IconButton(onClick = { 
@@ -270,19 +317,7 @@ fun WebViewBrowser(
             trailingIcon = {
                 IconButton(
                     onClick = {
-                        isEditingUrl = false  // Done editing, navigating
-                        val input = urlBarText.trim()
-                        val finalUrl = when {
-                            // Already a full URL
-                            input.startsWith("http://") || 
-                            input.startsWith("https://") || 
-                            input.startsWith("file://") -> input
-                            // Looks like a domain (contains dot, no spaces)
-                            input.contains(".") && !input.contains(" ") -> "https://$input"
-                            // Otherwise, search with selected search engine
-                            else -> getSearchUrl(input)
-                        }
-                        webViewState?.loadUrl(finalUrl)
+                        navigateToInput()
                     }
                 ) {
                     Text("Go")
@@ -290,10 +325,11 @@ fun WebViewBrowser(
             }
         )
         
-        // WebView
+        // WebView - only create after flip animation completes
         Box(modifier = Modifier.fillMaxSize()) {
-            AndroidView(
-                factory = { ctx ->
+            if (shouldCreateWebView) {
+                AndroidView(
+                    factory = { ctx ->
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -324,6 +360,10 @@ fun WebViewBrowser(
                             
                             // Privacy: Disable geolocation API (sites can't access device location)
                             setGeolocationEnabled(false)
+                            
+                            // Privacy: Block media capture APIs (camera, microphone)
+                            // This prevents WebView from even attempting to connect to camera service
+                            mediaPlaybackRequiresUserGesture = true
                             
                             // Security: Prevent JavaScript from automatically opening windows (popups)
                             javaScriptCanOpenWindowsAutomatically = false
@@ -374,11 +414,21 @@ fun WebViewBrowser(
                             }
                             
                             @android.webkit.JavascriptInterface
-                            fun deleteFavorite(id: Long): Boolean {
+                            fun deleteFavorite(id: String?): Boolean {
                                 return runBlocking(Dispatchers.IO) {
                                     try {
+                                        if (id == null) {
+                                            return@runBlocking false
+                                        }
+                                        
+                                        // Convert string to Int - more reliable than Number conversion
+                                        val intId = id.toIntOrNull()
+                                        if (intId == null) {
+                                            return@runBlocking false
+                                        }
+                                        
                                         val favorites = dao.getAllFavoritesList()
-                                        val favorite = favorites.find { it.id == id }
+                                        val favorite = favorites.find { it.id == intId }
                                         if (favorite != null) {
                                             dao.deleteFavorite(favorite)
                                             true
@@ -399,14 +449,7 @@ fun WebViewBrowser(
                                         // Test database access
                                         val allHistory = dao.getRecentHistoryList()
                                         val history = allHistory.filter { !it.url.startsWith("file:///android_asset/") }
-                                        // Log for debugging (count only, no URLs)
-                                        android.util.Log.d("WebViewBrowser", "History query: found ${allHistory.size} total, ${history.size} after filter")
-                                        
-                                        // If empty, try to verify database is working
-                                        if (allHistory.isEmpty()) {
-                                            android.util.Log.d("WebViewBrowser", "History is empty - database may have been cleared or not initialized")
-                                        }
-                                        
+
                                         // Convert to JSON in parallel with string building
                                         withContext(Dispatchers.Default) {
                                             if (history.isEmpty()) {
@@ -442,61 +485,15 @@ fun WebViewBrowser(
                             
                             @android.webkit.JavascriptInterface
                             fun clearCookiesAndHistory(): Boolean {
-                                return runBlocking {
-                                    try {
-                                        // Parallelize independent operations for better performance
-                                        val cookieJob = async(Dispatchers.IO) {
-                                            try {
-                                                val cookieManager = CookieManager.getInstance()
-                                                cookieManager.removeAllCookies(null)
-                                                cookieManager.flush()
-                                                delay(200) // Wait for async cookie removal
-                                                true
-                                            } catch (e: Exception) {
-                                                false
-                                            }
-                                        }
-                                        
-                                        val cacheJob = async(Dispatchers.Main) {
-                                            try {
-                                                webViewState?.let { view ->
-                                                    view.clearCache(true)
-                                                    view.clearHistory()
-                                                }
-                                                true
-                                            } catch (e: Exception) {
-                                                false
-                                            }
-                                        }
-                                        
-                                        val storageJob = async(Dispatchers.IO) {
-                                            try {
-                                                WebStorage.getInstance().deleteAllData()
-                                                true
-                                            } catch (e: Exception) {
-                                                false
-                                            }
-                                        }
-                                        
-                                        val databaseJob = async(Dispatchers.IO) {
-                                            try {
-                                                dao.clearHistory()
-                                                android.util.Log.d("WebViewBrowser", "History cleared successfully")
-                                                true
-                                            } catch (e: Exception) {
-                                                android.util.Log.e("WebViewBrowser", "History clear failed: ${e.message}")
-                                                false
-                                            }
-                                        }
-                                        
-                                        // Wait for all operations to complete in parallel
-                                        val results = awaitAll(cookieJob, cacheJob, storageJob, databaseJob)
-                                        
-                                        // Return true if at least some operations succeeded
-                                        results.any { it }
-                                    } catch (e: Exception) {
-                                        false
-                                    }
+                                return try {
+                                    BrowserPrivacyUtils.clearAllPrivacyDataSync(
+                                        webView = webViewState,
+                                        dao = dao
+                                    )
+                                    true
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WebViewBrowser", "Error clearing data: ${e.message}", e)
+                                    false
                                 }
                             }
                         }, "Android")
@@ -554,8 +551,10 @@ fun WebViewBrowser(
                                     if (newHost != null && currentHost != null && newHost != currentHost) {
                                         val preserveCookies = isQwantDomain(newHost) || isQwantDomain(currentHost)
                                         if (!preserveCookies) {
-                                            CookieManager.getInstance().removeSessionCookies(null)
-                                            CookieManager.getInstance().flush()
+                                            // Use utility function for consistency
+                                            scope.launch {
+                                                BrowserPrivacyUtils.clearSessionCookies()
+                                            }
                                         }
                                     }
                                 }
@@ -812,23 +811,24 @@ fun WebViewBrowser(
                     CircularProgressIndicator()
                 }
             }
+            }
         }
     }
     
     DisposableEffect(Unit) {
         onDispose {
             // Privacy: Clear all cookies and data when browser is closed
-            // This ensures no tracking data persists between sessions
-            val cookieManager = CookieManager.getInstance()
-            cookieManager.removeAllCookies(null)
-            cookieManager.flush()
-            
-            // Clear WebView cache and storage
-            webViewState?.clearCache(true)
-            webViewState?.clearHistory()
-            WebStorage.getInstance().deleteAllData()
-            
+            // Fast non-blocking clear, then destroy WebView immediately
+            BrowserPrivacyUtils.clearAllPrivacyDataSync(
+                webView = webViewState,
+                dao = null // Skip database in sync version to prevent ANR
+            )
             webViewState?.destroy()
+            
+            // Clear database asynchronously (non-blocking)
+            scope.launch(Dispatchers.IO) {
+                dao.clearHistory()
+            }
         }
     }
 }

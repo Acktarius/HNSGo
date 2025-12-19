@@ -1,0 +1,4 @@
+- fix bug when deleting favorite
+- navigation icon better contrast, glowing effect on click
+- "return" on keyboard tirggers as "Go"
+- crossfade transition inbetween modes

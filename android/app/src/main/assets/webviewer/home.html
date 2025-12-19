@@ -209,6 +209,10 @@
         let currentSwipeItem = null;
         
         function handleTouchStart(e, itemId) {
+            // Don't handle touch if it's on the delete button
+            if (e.target.closest('.favorite-item-delete')) {
+                return;
+            }
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
             currentSwipeItem = itemId;
@@ -216,6 +220,11 @@
         
         function handleTouchMove(e, itemId) {
             if (currentSwipeItem !== itemId) return;
+            
+            // Don't handle touch if it's on the delete button
+            if (e.target.closest('.favorite-item-delete')) {
+                return;
+            }
             
             const touchX = e.touches[0].clientX;
             const touchY = e.touches[0].clientY;
@@ -234,6 +243,12 @@
         
         function handleTouchEnd(e, itemId) {
             if (currentSwipeItem !== itemId) return;
+            
+            // Don't handle touch if it's on the delete button - let click event fire
+            if (e.target.closest('.favorite-item-delete')) {
+                currentSwipeItem = null;
+                return;
+            }
             
             const touchX = e.changedTouches[0].clientX;
             const deltaX = touchX - touchStartX;
@@ -266,26 +281,70 @@
             }
         }
         
-        function deleteFavorite(id, event) {
+        function handleDeleteFavorite(id, event) {
             if (event) {
                 event.stopPropagation();
                 event.preventDefault();
             }
-            if (typeof Android !== 'undefined' && Android.deleteFavorite) {
-                const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
-                const deleted = Android.deleteFavorite(numericId);
+            
+            if (typeof Android === 'undefined' || !Android.deleteFavorite) {
+                console.error('Android interface not available');
+                return;
+            }
+            
+            // Reset swipe state before deletion
+            const item = document.getElementById(`favorite-${id}`);
+            if (item) {
+                item.classList.remove('swiped');
+                const content = item.querySelector('.favorite-item-content');
+                if (content) {
+                    content.style.transform = '';
+                }
+            }
+            
+            // Convert ID to number - handle both string and number types
+            let numericId;
+            if (typeof id === 'string') {
+                numericId = parseInt(id, 10);
+            } else if (typeof id === 'number') {
+                numericId = Math.floor(id);
+            } else {
+                console.error('Invalid ID type:', typeof id);
+                return;
+            }
+            
+            if (isNaN(numericId)) {
+                console.error('Failed to convert ID to number:', id);
+                return;
+            }
+            
+            // Delete from database via Android interface
+            // Pass as string for more reliable conversion
+            try {
+                const deleted = Android.deleteFavorite(String(numericId));
+                
                 if (deleted) {
-                    const item = document.getElementById(`favorite-${id}`);
+                    // Remove item from DOM immediately
                     if (item) {
-                        item.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
-                        item.style.transform = 'translateX(-100%)';
-                        item.style.opacity = '0';
-                        setTimeout(() => {
-                            showFavoritesMenu();
-                        }, 300);
-                    } else {
-                        showFavoritesMenu();
+                        item.remove();
                     }
+                    // Check if list is now empty and update UI accordingly
+                    const container = document.getElementById('favoritesList');
+                    const remainingItems = container.querySelectorAll('.favorite-item');
+                    if (remainingItems.length === 0) {
+                        container.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">No favorites yet. Star a page to add it here!</p>';
+                    }
+                } else {
+                    // If deletion failed, restore swipe state
+                    if (item) {
+                        item.classList.add('swiped');
+                    }
+                }
+            } catch (e) {
+                console.error('Error calling Android.deleteFavorite:', e);
+                // Restore swipe state on error
+                if (item) {
+                    item.classList.add('swiped');
                 }
             }
         }
@@ -307,7 +366,7 @@
                                 <div class="favorite-item-url">${fav.url}</div>
                             </div>
                         </div>
-                        <div class="favorite-item-delete" onclick="deleteFavorite(${fav.id}, event)">Delete</div>
+                        <div class="favorite-item-delete" onclick="handleDeleteFavorite(${fav.id}, event)">Delete</div>
                     </div>
                 `).join('');
                 
